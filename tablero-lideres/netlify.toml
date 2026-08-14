@@ -1,0 +1,17 @@
+# SuperLikers - Vista Líderes (subset del dashboard: Costeo y Rentabilidad)
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# Datos del ETL desde Google Drive
+[[redirects]]
+  from = "/api/data"
+  to = "/.netlify/functions/finops-data"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
