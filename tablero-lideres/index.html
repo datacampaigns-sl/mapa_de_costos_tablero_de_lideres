@@ -261,6 +261,18 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
               <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Mes</div>
               <select id="conMes" onchange="renderConsolidada()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:130px"></select>
             </div>
+            <div>
+              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Rol / Sub-área</div>
+              <select id="conRol" onchange="_conFiltroChange()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:150px"><option value="">Todos</option></select>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Lider</div>
+              <select id="conLider" onchange="_conFiltroChange()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:150px"><option value="">Todos</option></select>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Persona</div>
+              <select id="conPersonaSel" onchange="_conFiltroChange()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:170px"><option value="">Todas</option></select>
+            </div>
             <div style="margin-left:auto;text-align:right">
               <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Utilizacion del mes</div>
               <div id="conSalud" style="font-size:28px;font-weight:800;line-height:1">-</div>
@@ -2337,6 +2349,18 @@ function renderLdrDet(){
 var conSelArea='', conSelMes='', conCompOpen=null;
 var _cConTrend=null;
 
+// Filtros de Líder / Rol (sub-área) / Persona — v2.4 (2026-09-18)
+// Se agregan como filtros ADICIONALES sobre área+mes, no como reemplazo:
+// leen de DASH.personas_por_periodo (único array del JSON que hoy trae
+// rol/lider/modalidad por persona — ver etl-finops-v2.gs v2.2.4). Los KPIs
+// de arriba (Bloque A) vienen de programas_detalle, que NO tiene dimensión
+// de persona, así que esos números seguían siendo a nivel de área completa
+// aun con estos filtros activos; lo que sí se filtra es todo lo que ya
+// tenía granularidad de persona: el panel de "Personas del área con
+// ajustes" y los cruces de Tiempo / Horas No Facturables (vía rowsPD).
+var conSelRol='', conSelLider='', conSelPersona='';
+var _conFiltrosKey='';  // area+'|'+mes de la última vez que se poblaron las opciones
+
 // ============================================================================
 // CRUCE DE FILTROS (cross-filter) reutilizable — estilo Power BI.
 // Selección única por bloque: clic en una barra de persona/programa/componente
@@ -2460,12 +2484,80 @@ function _conPoblarSelectores(){
   conSelArea=selA.value; conSelMes=selM.value;
 }
 
+/**
+ * Puebla los 3 selects de Rol/Lider/Persona a partir de personas_por_periodo
+ * del área+mes actualmente seleccionados. Si el área o el mes cambiaron desde
+ * la última vez (nueva `key`), se resetean las 3 selecciones a "Todos/Todas"
+ * — un líder o persona de un área ya no tiene sentido al cambiar de área.
+ * Si solo cambió uno de los 3 filtros nuevos (ej. el usuario eligió un Lider),
+ * la key es la misma y NO se resetean las otras selecciones.
+ */
+function _conPoblarFiltrosPersona(area, per){
+  var selR=document.getElementById('conRol'), selL=document.getElementById('conLider'), selP=document.getElementById('conPersonaSel');
+  if(!selR||!selL||!selP) return;
+  var key = area+'|'+per;
+  var personasArea = (DASH.personas_por_periodo||[]).filter(function(p){return p.area===area && p.p===per;});
+
+  if(key !== _conFiltrosKey){
+    _conFiltrosKey = key;
+    conSelRol=''; conSelLider=''; conSelPersona='';
+  }
+
+  var roles={}, lideres={};
+  personasArea.forEach(function(p){
+    if(p.rol) roles[p.rol]=true;
+    if(p.lider) lideres[p.lider]=true;
+  });
+  selR.innerHTML = '<option value="">Todos</option>' + Object.keys(roles).sort().map(function(r){return '<option'+(r===conSelRol?' selected':'')+'>'+r+'</option>';}).join('');
+  selL.innerHTML = '<option value="">Todos</option>' + Object.keys(lideres).sort().map(function(l){return '<option'+(l===conSelLider?' selected':'')+'>'+l+'</option>';}).join('');
+
+  // Persona: respeta rol/lider ya elegidos, para no mostrar gente fuera del filtro activo
+  var personasFiltradas = personasArea.filter(function(p){
+    return (!conSelRol || p.rol===conSelRol) && (!conSelLider || p.lider===conSelLider);
+  });
+  var nombres={};
+  personasFiltradas.forEach(function(p){ if(p.persona) nombres[p.persona]=true; });
+  if(conSelPersona && !nombres[conSelPersona]) conSelPersona='';  // ya no aplica con el rol/lider elegido
+  selP.innerHTML = '<option value="">Todas</option>' + Object.keys(nombres).sort().map(function(n){return '<option'+(n===conSelPersona?' selected':'')+'>'+n+'</option>';}).join('');
+
+  selR.value=conSelRol; selL.value=conSelLider; selP.value=conSelPersona;
+}
+
+/** onchange de los 3 selects nuevos: lee su valor y vuelve a renderizar todo el bloque. */
+function _conFiltroChange(){
+  var selR=document.getElementById('conRol'), selL=document.getElementById('conLider'), selP=document.getElementById('conPersonaSel');
+  conSelRol = selR ? selR.value : '';
+  conSelLider = selL ? selL.value : '';
+  conSelPersona = selP ? selP.value : '';
+  renderConsolidada();
+}
+
+/**
+ * Devuelve el set (objeto {nombre:true}) de personas que cumplen los filtros
+ * de Rol/Lider/Persona actualmente activos, dentro del área+mes dados.
+ * Se usa para filtrar `personas_detalle` (que no trae rol/lider propios,
+ * ver decisiones-arquitectura.md) por nombre de persona.
+ */
+function _conPersonasPermitidas(area, per){
+  var set={};
+  (DASH.personas_por_periodo||[]).filter(function(p){
+    return p.area===area && p.p===per
+      && (!conSelRol || p.rol===conSelRol)
+      && (!conSelLider || p.lider===conSelLider)
+      && (!conSelPersona || p.persona===conSelPersona);
+  }).forEach(function(p){ if(p.persona) set[p.persona]=true; });
+  return set;
+}
+
 function renderConsolidada(){
   if(!DASH) return;
   _conPoblarSelectores();
   if(!conSelArea||!conSelMes) return;
 
   var area=conSelArea, per=conSelMes;
+  _conPoblarFiltrosPersona(area, per);
+  var filtroPersonaActivo = !!(conSelRol || conSelLider || conSelPersona);
+  var personasPermitidas = filtroPersonaActivo ? _conPersonasPermitidas(area, per) : null;
   document.getElementById('conTitle').textContent = area;
   document.getElementById('conSubtitle').textContent = 'Vista consolidada de ' + area + ' — ' + per;
 
@@ -2533,8 +2625,14 @@ function renderConsolidada(){
   // Si el mes está fuera de la ventana del ETL (o no se ha corrido main() con
   // la versión que la genera), se cae a `rows` (programas_detalle) sin persona.
   var rowsPD = (DASH.personas_detalle||[]).filter(function(x){return x.area===area && x.p===per;});
-  var conPersona = rowsPD.length>0;
-  var rowsTiempoDet = conPersona ? rowsPD : rows;
+  // Filtro Rol/Lider/Persona: personas_detalle no trae esos campos propios,
+  // así que se filtra por nombre usando el set resuelto desde personas_por_periodo.
+  if(personasPermitidas) rowsPD = rowsPD.filter(function(x){return personasPermitidas[x.persona];});
+  // Si el filtro de persona/lider/rol está activo, nunca caer a `rows` (que no
+  // tiene persona y mostraría el área completa sin filtrar) — mejor mostrar
+  // "sin datos" que datos que ignoran el filtro elegido.
+  var conPersona = rowsPD.length>0 || filtroPersonaActivo;
+  var rowsTiempoDet = (conPersona || filtroPersonaActivo) ? rowsPD : rows;
   _conRenderTiempo(rowsTiempoDet, per, conPersona);
   var rowsNFDet = conPersona ? rowsPD.filter(function(x){return x.fact==='NF';}) : rows.filter(function(x){return x.fact==='NF';});
   _conRenderNF(rowsNFDet, per, hNF, conPersona);
@@ -2564,7 +2662,12 @@ function _conRenderAjustes(rows, per, hAju, hTot){
   if(tag) tag.textContent = Math.round(hAju)+'h · '+ajusteRows.length+' registros · '+arr.length+' comp x prog';
 
   // Personas asociadas (aprox): personas_por_periodo con hAjustes>0 del area/mes
-  var personas=(DASH.personas_por_periodo||[]).filter(function(p){return p.area===conSelArea&&p.p===per&&(p.hAjustes||0)>0;}).sort(function(a,b){return b.hAjustes-a.hAjustes;});
+  var personas=(DASH.personas_por_periodo||[]).filter(function(p){
+    return p.area===conSelArea&&p.p===per&&(p.hAjustes||0)>0
+      && (!conSelRol || p.rol===conSelRol)
+      && (!conSelLider || p.lider===conSelLider)
+      && (!conSelPersona || p.persona===conSelPersona);
+  }).sort(function(a,b){return b.hAjustes-a.hAjustes;});
 
   var html = '<div class="g2" style="gap:14px">';
   // Columna izquierda: por componente x programa
