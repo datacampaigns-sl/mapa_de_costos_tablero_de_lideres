@@ -33,6 +33,8 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
 .hdr-select{font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--bg);color:var(--txt);cursor:pointer}
 .hdr-btn{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);font-size:11px;color:var(--muted);cursor:pointer;transition:background .15s}
 .hdr-btn:hover{background:var(--bg)}.dot-live{width:6px;height:6px;border-radius:50%;background:#1D9E75;flex-shrink:0}
+#selModo span{color:var(--muted)}
+#selModo span.modo-on{background:#534AB7;color:#fff;font-weight:600}
 .theme-btn{width:30px;height:30px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:15px}
 .theme-btn:hover{background:var(--bg)}
 #body{display:flex;flex:1;overflow:hidden}
@@ -145,7 +147,15 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
       </div>
       <select class="hdr-select" id="selAno"></select>
       <select class="hdr-select" id="selMes"></select>
-      
+      <!-- v2.11 (2026-09-18): toggle Mensual/Consolidado — pedido del usuario
+           ("un boton si se quiere ver la informacion del año o la del mes").
+           Consolidado = agregado real de todo el año (no solo navegacion):
+           suma/promedia los 12 (o los que existan) meses en vez de mostrar
+           un solo mes — ver FinOpsAdapter.buildVMAnual(). -->
+      <div class="hdr-select" id="selModo" style="display:flex;padding:2px;gap:2px">
+        <span onclick="_cambiarModo('mensual')" id="modoBtnMensual" style="padding:3px 8px;border-radius:5px;cursor:pointer">Mensual</span>
+        <span onclick="_cambiarModo('anual')" id="modoBtnAnual" style="padding:3px 8px;border-radius:5px;cursor:pointer">Consolidado</span>
+      </div>
       <button class="theme-btn" onclick="toggleTheme()" title="Cambiar tema"><i class="ti ti-moon" id="themeIcon"></i></button>
     </div>
   </div>
@@ -309,11 +319,35 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
           <div style="height:280px;margin-top:8px"><canvas id="cConTrend"></canvas></div>
         </div>
 
-        <!-- BLOQUE AJUSTES DETALLADO (verifica los N componentes) -->
-        <div class="card" style="margin-bottom:14px;border-left:3px solid #A32D2D">
+        <!-- BLOQUE AJUSTES DETALLADO (verifica los N componentes).
+             v2.11 (2026-09-18): oculto para áreas "asignadoras" (Engagement,
+             Ecosistemas — ver _conEsAsignadora). Decisión del usuario: esas
+             áreas no ejecutan la tarea en Jira, solo la asignan a otras
+             áreas, así que no "cometen" los ajustes/retrabajos que mide este
+             bloque — mostrarlo ahí no aporta y confunde. -->
+        <div class="card" id="conAjuCard" style="margin-bottom:14px;border-left:3px solid #A32D2D">
           <div class="ctitle">Ajustes del mes · verificacion <span class="tag tr" id="conAjuTag">-</span></div>
           <div class="csub">Componentes con palabra "ajuste", "correc" o "retrab" en el nombre · con horas, programa y persona (cuando esta disponible)</div>
           <div id="conAjuBody" style="margin-top:8px"></div>
+        </div>
+
+        <!-- BLOQUE ASIGNADORAS (Engagement / Ecosistemas) — v2.11 (2026-09-18).
+             Solo visible cuando el área resuelta es "asignadora" de Jiras a
+             otras áreas (no ejecuta ella misma). Dos vistas que sí les sirven
+             a estos líderes, a nivel de TODOS los programas de la compañía
+             (no solo los de su propia área — ver _conRenderAsignadora):
+               1) Consumo de horas Facturables/No Facturables por programa.
+               2) Desglose Programa × Área × Componente: qué área consumió
+                  más horas de cada programa que ellas asignaron. -->
+        <div class="card" id="conAsigCard" style="margin-bottom:14px;border-left:3px solid #1D9E75;display:none">
+          <div class="ctitle">Consumo de horas por programa (toda la compañia) <span class="tag tp" id="conAsigTag">-</span></div>
+          <div class="csub">Facturable vs No Facturable por programa, todas las areas del mes seleccionado — vista para lideres que asignan Jiras a otras areas</div>
+          <div style="height:280px;margin-top:8px"><canvas id="cConAsigProg"></canvas></div>
+        </div>
+        <div class="card" id="conAsigDescCard" style="margin-bottom:14px;border-left:3px solid #1D9E75;display:none">
+          <div class="ctitle">Desglose Programa x Area x Componente <span class="tag tp" id="conAsigDescTag">-</span></div>
+          <div class="csub">Que area consumio mas horas de cada programa este mes · ordenado por horas desc</div>
+          <div id="conAsigDescBody" style="margin-top:8px;overflow-x:auto"></div>
         </div>
 
         <!-- BLOQUE 🅒 EN QUÉ SE FUE EL TIEMPO (cruce de filtros estilo Power BI) -->
@@ -1707,14 +1741,159 @@ async function sendChat(){
     return m;
   }
 
-  root.FinOpsAdapter = { buildVM: buildVM, etiquetaMes: etiquetaMes };
+  /**
+   * buildVMAnual — vista-modelo "Consolidado" (v2.11, 2026-09-18).
+   * Decisión explícita del usuario: "el consolidado de todo el año, ya no
+   * veríamos datos por mes si no los de todo el año" — no es solo
+   * navegación año→mes, es agregación real: los KPIs y totales del año
+   * salen de SUMAR (o promediar, donde sumar no aplica — ver detalle abajo)
+   * todos los períodos de ese año, en vez de leer un solo `resumen_por_periodo`.
+   * Mantiene la MISMA forma de salida que buildVM() (mismos campos que
+   * consumen aplicarVM/_renderTodo) para no duplicar los renders — solo
+   * cambia cómo se calculan.
+   * Reglas de agregación:
+   *   - Costos/gastos/ingresos/utilidad/horas: SUMA de los meses del año.
+   *   - Margen %: recalculado sobre los totales del año (utilidad/ingresos),
+   *     NUNCA promedio de los márgenes mensuales (un promedio de porcentajes
+   *     con bases distintas por mes da un número sin sentido financiero).
+   *   - Valor hora (MOD / MOD+MOI / completo): costo total del año / horas
+   *     disponibles totales del año — mismo principio que el margen, valor
+   *     hora es un cociente de acumulados, no un promedio de valores hora
+   *     mensuales (que pesaría igual un mes de 100h que uno de 900h).
+   *   - Colaboradores MOD / tiempo laboral: promedio simple de los meses con
+   *     dato (son "fotos" mensuales, no algo que tenga sentido sumar).
+   *   - Áreas / egresos por rubro / egresos por categoría / ingresos por
+   *     programa / programas por costo-horas: SUMA across todos los meses
+   *     del año (son montos, sí se pueden sumar).
+   */
+  function buildVMAnual(data, anio){
+    var resumen = data.resumen_por_periodo || [];
+    var byP = {}; resumen.forEach(function(r){ byP[r.periodo] = r; });
+    var areasByP = {}; (data.areas_por_periodo||[]).forEach(function(a){ areasByP[a.periodo]=a; });
+    var egrByP   = {}; (data.egresos_por_periodo||[]).forEach(function(e){ egrByP[e.periodo]=e; });
+    var ingByP   = {}; (data.ingresos_por_periodo||[]).forEach(function(i){ ingByP[i.periodo]=i; });
+
+    // Todos los períodos de ese año que existan en CUALQUIER fuente — mismo
+    // criterio que _poblarSelectores() en el frontend (series_tiempo.periodos),
+    // para que "Consolidado" no dependa del cruce roto de Nómina/Maestro.
+    var periodosAll = (data.series_tiempo && data.series_tiempo.periodos) || resumen.map(function(r){return r.periodo;});
+    var win = periodosAll.filter(function(p){ return p && p.split('-')[0]===anio; }).sort();
+
+    var meses = win.map(etiquetaMes);
+    var cgo = win.map(function(p){ var r=byP[p]; return r2((r?r.costos_gastos:0)/M); });
+    var nom = win.map(function(p){ var r=byP[p]; return r2((r?(r.mod+r.moi):0)/M); });
+    var ingresosSerie = win.map(function(p){ var r=byP[p]; return r2((r?r.ingresos:0)/M); });
+    var margenSerie = win.map(function(p){ var r=byP[p]; return r?r.margen_pct:null; });
+
+    var totMod=0,totMoi=0,totCg=0,totIng=0,totHorasDisp=0,totHorasJira=0,totColabMod=0,nColab=0,totTL=0,nTL=0;
+    win.forEach(function(p){
+      var r=byP[p]; if(!r) return;
+      totMod+=r.mod||0; totMoi+=r.moi||0; totCg+=r.costos_gastos||0; totIng+=r.ingresos||0;
+      totHorasDisp+=r.horas_disponibles||0; totHorasJira+=r.horas_jira||0;
+      if(r.colaboradores_mod){ totColabMod+=r.colaboradores_mod; nColab++; }
+      if(r.tiempo_laboral){ totTL+=r.tiempo_laboral; nTL++; }
+    });
+    var costoTotalAnio = totMod+totMoi+totCg;
+    var utilidadAnio = totIng - costoTotalAnio;
+    var margenAnio = totIng ? r2(utilidadAnio/totIng*100) : null;
+    var vhModAnio     = totHorasDisp ? Math.round(totMod/totHorasDisp) : 0;
+    var vhModMoiAnio  = totHorasDisp ? Math.round((totMod+totMoi)/totHorasDisp) : 0;
+    var vhFullAnio    = totHorasDisp ? Math.round(costoTotalAnio/totHorasDisp) : 0;
+    var colabModProm  = nColab ? Math.round(totColabMod/nColab) : 0;
+    var tlProm        = nTL ? Math.round(totTL/nTL) : 0;
+
+    var distNomPct = costoTotalAnio ? r2((totMod+totMoi)/costoTotalAnio*100) : 0;
+    var distCgPct  = costoTotalAnio ? r2(totCg/costoTotalAnio*100) : 0;
+
+    var vh = [vhModAnio, vhModMoiAnio, vhFullAnio];
+    var vhTrend = {
+      mod:    win.map(function(p){ var r=byP[p]; return Math.round(r?(r.vh_mod||0):0); }),
+      modmoi: win.map(function(p){ var r=byP[p]; return Math.round(r?(r.vh_mod_moi||0):0); }),
+      full:   win.map(function(p){ var r=byP[p]; return Math.round(r?(r.vh_full||0):0); })
+    };
+
+    // Top programas por costo, agregado en TODO el año (misma lógica que
+    // buildVM, solo que la ventana es el año completo en vez de 5 meses)
+    var progAcc = {};
+    (data.programas_por_periodo||[]).forEach(function(p){
+      if (win.indexOf(p.periodo) < 0) return;
+      if (!progAcc[p.programa]) progAcc[p.programa] = { n:p.programa, h:0, c:0 };
+      progAcc[p.programa].h += (p.horas_jira||0);
+      progAcc[p.programa].c += (p.costo_full||0);
+    });
+    var progs = Object.keys(progAcc).map(function(k){
+      var o = progAcc[k]; return { n:o.n, h:Math.round(o.h), c:r2(o.c/M) };
+    }).sort(function(a,b){ return b.c - a.c; });
+
+    var progMes = {};
+    (data.programas_por_periodo||[]).forEach(function(p){
+      var idx = win.indexOf(p.periodo); if (idx < 0) return;
+      if (!progMes[p.programa]) progMes[p.programa] = win.map(function(){ return 0; });
+      progMes[p.programa][idx] = Math.round(p.horas_jira||0);
+    });
+
+    // Nómina por área — SUMA de por_area de cada mes del año
+    var areasNomTot = {};
+    win.forEach(function(p){
+      var a = areasByP[p];
+      if (a && a.por_area) Object.keys(a.por_area).forEach(function(k){ areasNomTot[k] = (areasNomTot[k]||0) + a.por_area[k]; });
+    });
+    Object.keys(areasNomTot).forEach(function(k){ areasNomTot[k] = r2(areasNomTot[k]/M); });
+
+    // Egresos por rubro/categoría — SUMA del año
+    var egrRubro = {}, egrCat = {};
+    win.forEach(function(p){
+      var e = egrByP[p];
+      if (e){
+        Object.keys(e.por_rubro||{}).forEach(function(k){ egrRubro[k] = (egrRubro[k]||0) + e.por_rubro[k]; });
+        Object.keys(e.por_categoria||{}).forEach(function(k){ egrCat[k] = (egrCat[k]||0) + e.por_categoria[k]; });
+      }
+    });
+    Object.keys(egrRubro).forEach(function(k){ egrRubro[k] = r2(egrRubro[k]/M); });
+    Object.keys(egrCat).forEach(function(k){ egrCat[k] = r2(egrCat[k]/M); });
+
+    // Ingresos por programa — SUMA del año
+    var ingProg = {};
+    win.forEach(function(p){
+      var i = ingByP[p];
+      if (i) Object.keys(i.por_programa||{}).forEach(function(k){ ingProg[k] = (ingProg[k]||0) + i.por_programa[k]; });
+    });
+    Object.keys(ingProg).forEach(function(k){ ingProg[k] = r2(ingProg[k]/M); });
+
+    var hjDet = {}; (data.programas_detalle||[]).forEach(function(x){ if (win.indexOf(x.p)>=0) hjDet[x.p]=(hjDet[x.p]||0)+(x.horas||0); });
+    var horasJiraAnio = totHorasJira || Object.keys(hjDet).reduce(function(s,k){ return s+hjDet[k]; }, 0);
+
+    var kpis = {
+      periodo: anio,
+      mod: totMod, moi: totMoi, costos_gastos: totCg,
+      costo_total: costoTotalAnio,
+      ingresos: totIng, utilidad: utilidadAnio, margen_pct: margenAnio,
+      vh_mod: vhModAnio, vh_mod_moi: vhModMoiAnio, vh_full: vhFullAnio,
+      colaboradores_mod: colabModProm, tiempo_laboral: tlProm,
+      horas_disponibles: totHorasDisp, horas_jira: horasJiraAnio
+    };
+
+    return {
+      periodoSel: anio, periodos: win, meses: meses,
+      cgo: cgo, nom: nom, ingresos: ingresosSerie, margen: margenSerie,
+      distNomPct: distNomPct, distCgPct: distCgPct,
+      vh: vh, vhTrend: vhTrend,
+      progs: progs, progMes: progMes,
+      areasNomTot: areasNomTot, egrRubro: egrRubro, egrCat: egrCat, ingProg: ingProg,
+      kpis: kpis,
+      aniosDisponibles: aniosDe(resumen), mesesDe: mesesPorAnio(resumen.filter(function(r){return (r.mod||0)>0;})),
+      modo: 'anual'
+    };
+  }
+
+  root.FinOpsAdapter = { buildVM: buildVM, buildVMAnual: buildVMAnual, etiquetaMes: etiquetaMes };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.FinOpsAdapter;
 })(typeof window !== 'undefined' ? window : this);
 
 var TOT={mod:1141502485,modmoi:1808481651,cg:1027740227};
 var VM=null, DASH=null;
 function _num(n){return '$'+Math.round(n||0).toLocaleString('es-CO');}
-function _buildCtx(vm){var k=vm.kpis;return 'Eres analista financiero de SuperLikers. Datos reales del mes '+k.periodo+': '
+function _buildCtx(vm){var k=vm.kpis;return 'Eres analista financiero de SuperLikers. Datos reales del '+(vm.modo==='anual'?'año':'mes')+' '+k.periodo+': '
   +'MOD '+_num(k.mod)+', MOI '+_num(k.moi)+', Costos y Gastos '+_num(k.costos_gastos)+', Ingresos '+_num(k.ingresos)
   +', Utilidad '+_num(k.utilidad)+', Margen '+k.margen_pct+'%. Valor hora: MOD '+_num(k.vh_mod)+', MOD+MOI '+_num(k.vh_mod_moi)
   +', Completo '+_num(k.vh_full)+'. Colaboradores MOD '+k.colaboradores_mod+', horas disponibles '+Math.round(k.horas_disponibles)
@@ -1735,7 +1914,7 @@ function renderKPIs(){
   set('kVh1',fmt(Math.round(k.vh_mod))); set('kVh2',fmt(Math.round(k.vh_mod_moi))); set('kVh3',fmt(Math.round(k.vh_full)));
   set('kVh1Sub',k.colaboradores_mod+' MOD x '+k.tiempo_laboral+'h');
   var nomcg=(k.mod+k.moi)+k.costos_gastos;
-  set('ovPeriodo','Mes: '+k.periodo); set('ovEgr','Egresos: '+fmtM(nomcg));
+  set('ovPeriodo',(VM.modo==='anual'?'Año: ':'Mes: ')+k.periodo); set('ovEgr','Egresos: '+fmtM(nomcg));
   set('ovNomPct','Nomina: '+(nomcg?((k.mod+k.moi)/nomcg*100).toFixed(1):0)+'%');
   set('ovCgPct','C&G: '+(nomcg?(k.costos_gastos/nomcg*100).toFixed(1):0)+'%');
   var mt=document.getElementById('ovMargen');
@@ -1770,15 +1949,46 @@ function _renderTodo(){
   if(hsld){ updH(hsld.value); }
 }
 var _MESNOM=['','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+// v2.11 (2026-09-18) — Toggle Mensual/Consolidado del header. "Consolidado"
+// es agregación real de todo el año (ver FinOpsAdapter.buildVMAnual), no
+// solo una ayuda de navegación — decisión explícita del usuario.
+var HDR_MODO = 'mensual'; // 'mensual' | 'anual'
+function _pintarModoBtns(){
+  var bM=document.getElementById('modoBtnMensual'), bA=document.getElementById('modoBtnAnual');
+  if(bM) bM.className = HDR_MODO==='mensual' ? 'modo-on' : '';
+  if(bA) bA.className = HDR_MODO==='anual' ? 'modo-on' : '';
+  var selM=document.getElementById('selMes');
+  if(selM){ selM.disabled = (HDR_MODO==='anual'); selM.style.opacity = (HDR_MODO==='anual') ? '0.4' : '1'; }
+}
+function _cambiarModo(modo){
+  if(modo===HDR_MODO) return;
+  HDR_MODO = modo;
+  var selA=document.getElementById('selAno'), selM=document.getElementById('selMes');
+  var anio = (selA && selA.value) || (VM && VM.periodoSel ? VM.periodoSel.split('-')[0] : '');
+  var mes  = (selM && selM.value) || (VM && VM.periodoSel && VM.modo!=='anual' ? VM.periodoSel.split('-')[1] : null);
+  _cambiarPeriodo(anio, HDR_MODO==='anual' ? null : mes);
+}
 function _poblarSelectores(){
   var selA=document.getElementById('selAno'), selM=document.getElementById('selMes');
   if(!selA||!selM||!DASH) return;
-  var res=(DASH.resumen_por_periodo||[]).filter(function(r){return (r.mod||0)>0;});
-  var anios={}; res.forEach(function(r){anios[r.periodo.split('-')[0]]=true;});
+  _pintarModoBtns();
+  // v2.10 (2026-09-18) — BUGFIX: antes filtraba los periodos disponibles por
+  // `r.mod>0` (costo de nomina). El cruce Maestro/Nomina que llena `mod` esta
+  // devolviendo 0 en TODOS los periodos (falla preexistente, no de esta
+  // sesion — ver decisiones-arquitectura.md, cruce Nomina/Maestro pendiente),
+  // asi que `res` quedaba vacio y los 2 selectores del header se renderizaban
+  // sin ninguna opcion — "no funcionan" era literalmente "no hay nada que
+  // mostrar", no un problema de wiring. Se cambia el criterio a la union
+  // real de periodos con datos de CUALQUIER fuente (`series_tiempo.periodos`,
+  // ya construida en el ETL para este mismo proposito), independiente de si
+  // el cruce de nomina esta sano.
+  var periodosAll=(DASH.series_tiempo&&DASH.series_tiempo.periodos)||(DASH.resumen_por_periodo||[]).map(function(r){return r.periodo;});
+  var anios={}; periodosAll.forEach(function(p){ if(p) anios[p.split('-')[0]]=true; });
   var la=Object.keys(anios).sort();
   var pa=(VM.periodoSel||'').split('-');
   selA.innerHTML=la.map(function(a){return '<option'+(a===pa[0]?' selected':'')+'>'+a+'</option>';}).join('');
-  var mesesA=res.filter(function(r){return r.periodo.split('-')[0]===pa[0];}).map(function(r){return r.periodo.split('-')[1];}).sort();
+  var mesesA=periodosAll.filter(function(p){return p&&p.split('-')[0]===pa[0];}).map(function(p){return p.split('-')[1];}).sort();
   selM.innerHTML=mesesA.map(function(m){return '<option value="'+m+'"'+(m===pa[1]?' selected':'')+'>'+_MESNOM[parseInt(m,10)]+'</option>';}).join('');
   selA.onchange=function(){ _cambiarPeriodo(selA.value, null); };
   selM.onchange=function(){ _cambiarPeriodo(selA.value, selM.value); };
@@ -1791,8 +2001,20 @@ function _poblarSelectoresEg(){
   sm.onchange=function(){ egFiltro.m=sm.value; renderEgresos(); };
 }
 function _cambiarPeriodo(anio, mes){
-  var res=(DASH.resumen_por_periodo||[]).filter(function(r){return (r.mod||0)>0 && r.periodo.split('-')[0]===anio;});
-  if(!mes){ mes=res.length?res[res.length-1].periodo.split('-')[1]:'01'; }
+  // v2.11 (2026-09-18) — modo "anual" (Consolidado): construye la vista-modelo
+  // agregando TODO el año con buildVMAnual(), no un solo mes. El selector de
+  // Mes queda deshabilitado en este modo (ver _pintarModoBtns) porque ya no
+  // aplica: no hay "un mes" seleccionado, hay un año completo.
+  if (HDR_MODO === 'anual'){
+    aplicarVM(FinOpsAdapter.buildVMAnual(DASH, anio));
+    _poblarSelectores();
+    _renderTodo();
+    return;
+  }
+  // v2.10 — mismo fix que _poblarSelectores(): no depender de r.mod>0.
+  var periodosAll=(DASH.series_tiempo&&DASH.series_tiempo.periodos)||(DASH.resumen_por_periodo||[]).map(function(r){return r.periodo;});
+  var res=periodosAll.filter(function(p){return p&&p.split('-')[0]===anio;}).sort();
+  if(!mes){ mes=res.length?res[res.length-1].split('-')[1]:'01'; }
   aplicarVM(FinOpsAdapter.buildVM(DASH,{periodo:anio+'-'+mes}));
   _poblarSelectores();
   _renderTodo();
@@ -2467,6 +2689,21 @@ function cfBarras(blockId, dim, arr, colorSel, colorBase, topN){
   return html;
 }
 
+/**
+ * Áreas "asignadoras": no ejecutan la tarea en Jira, la reparten a otras
+ * áreas (Engagement, Ecosistemas — nombres confirmados por el usuario,
+ * 2026-09-18). Para ellas el bloque de Ajustes no aplica (no cometen los
+ * retrabajos que ese bloque mide) y sí les sirve ver el consumo de horas
+ * de TODOS los programas de la compañía, no solo los de su propia área
+ * (que en la práctica casi no ejecuta horas directamente).
+ * Comparación normalizada (sin tildes, mayúsculas) para no fallar por un
+ * acento distinto en la fuente.
+ */
+var _AREAS_ASIGNADORAS = ['ENGAGEMENT','ECOSISTEMAS'];
+function _conEsAsignadora(area){
+  return _AREAS_ASIGNADORAS.indexOf(_conNorm(area)) >= 0;
+}
+
 function _conAjusteRe(s){
   var t=(s||'').toLowerCase();
   return t.indexOf('ajust')>=0 || t.indexOf('correc')>=0 || t.indexOf('retrab')>=0;
@@ -2626,6 +2863,11 @@ function renderConsolidada(){
   var personasPermitidas = filtroPersonaActivo ? _conPersonasPermitidas(area, per) : null;
   document.getElementById('conTitle').textContent = area;
   document.getElementById('conSubtitle').textContent = 'Vista consolidada de ' + area + ' — ' + per;
+  var esAsignadora = _conEsAsignadora(area);
+  var elAju=document.getElementById('conAjuCard'), elAsig=document.getElementById('conAsigCard'), elAsigD=document.getElementById('conAsigDescCard');
+  if(elAju) elAju.style.display = esAsignadora ? 'none' : '';
+  if(elAsig) elAsig.style.display = esAsignadora ? '' : 'none';
+  if(elAsigD) elAsigD.style.display = esAsignadora ? '' : 'none';
 
   // Data del mes seleccionado del área
   var rows=(DASH.programas_detalle||[]).filter(function(x){return x.area===area && x.p===per;});
@@ -2700,8 +2942,11 @@ function renderConsolidada(){
   // BLOQUE 🅑 — Evolución mensual
   _conRenderTrend(area);
 
-  // BLOQUE AJUSTES DETALLADO
-  _conRenderAjustes(rows, area, per, hAju, hTot);
+  // BLOQUE AJUSTES DETALLADO — no aplica a áreas asignadoras (ver
+  // _conEsAsignadora); en su lugar se pinta el bloque de consumo por
+  // programa a nivel de toda la compañía.
+  if (esAsignadora) { _conRenderAsignadora(per); }
+  else { _conRenderAjustes(rows, area, per, hAju, hTot); }
 
   // BLOQUE 🅒 / 🅓 — En qué se fue el tiempo · Horas No Facturables
   // Fuente preferida: personas_detalle (tiene persona+programa+componente).
@@ -2717,11 +2962,116 @@ function renderConsolidada(){
   var conPersona = rowsPD.length>0 || filtroPersonaActivo;
   var rowsTiempoDet = (conPersona || filtroPersonaActivo) ? rowsPD : rows;
   _conRenderTiempo(rowsTiempoDet, per, conPersona);
-  var rowsNFDet = conPersona ? rowsPD.filter(function(x){return x.fact==='NF';}) : rows.filter(function(x){return x.fact==='NF';});
-  _conRenderNF(rowsNFDet, per, hNF, conPersona);
+  // v2.11 (2026-09-18) — Horas No Facturables para áreas asignadoras: el
+  // usuario confirmó que este foco (NF) está bien, pero debe ser de TODOS
+  // los programas de la compañía ese mes, no solo los de su área (que casi
+  // no ejecuta horas directamente — las asigna a otras áreas). Se usa
+  // personas_detalle sin filtro de área/persona (company-wide); si el mes
+  // está fuera de la ventana que trae persona, se cae a programas_detalle
+  // (también sin filtro de área) — mismo patrón de fallback que arriba.
+  var rowsNFDet;
+  if (esAsignadora){
+    var pdTodas=(DASH.personas_detalle||[]).filter(function(x){return x.p===per;});
+    var conPersonaTodas = pdTodas.length>0;
+    var baseTodas = conPersonaTodas ? pdTodas : (DASH.programas_detalle||[]).filter(function(x){return x.p===per;});
+    rowsNFDet = baseTodas.filter(function(x){return x.fact==='NF';});
+    var hNFTodas = rowsNFDet.reduce(function(s,x){return s+(x.horas||0);},0);
+    _conRenderNF(rowsNFDet, per, hNFTodas, conPersonaTodas);
+  } else {
+    rowsNFDet = conPersona ? rowsPD.filter(function(x){return x.fact==='NF';}) : rows.filter(function(x){return x.fact==='NF';});
+    _conRenderNF(rowsNFDet, per, hNF, conPersona);
+  }
 
   // BLOQUE 🅔 — Compromiso vs Ejecutado
   _conRenderCompromiso(area, per);
+}
+
+var _cConAsigProg=null;
+/**
+ * Bloque para áreas asignadoras (Engagement, Ecosistemas — ver
+ * _conEsAsignadora). Estas áreas no ejecutan la tarea en Jira, la asignan a
+ * otras áreas, así que lo que les sirve como líderes no es "su" ejecución
+ * (casi no tienen) sino la de TODOS los programas de la compañía ese mes:
+ *   1) Consumo de horas Facturables/No Facturables por programa (gráfica).
+ *   2) Desglose Programa x Área x Componente: qué área se llevó más horas
+ *      de cada programa (tabla) — les dice, del trabajo que ellas asignan,
+ *      quién terminó ejecutándolo y cuánto.
+ * Fuente: programas_detalle del período, SIN filtrar por área — a
+ * propósito, es la única forma de ver "toda la compañía".
+ */
+function _conRenderAsignadora(per){
+  var rowsTodas=(DASH.programas_detalle||[]).filter(function(x){return x.p===per;});
+  var tagEl=document.getElementById('conAsigTag');
+  if(tagEl) tagEl.textContent = per+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas';
+
+  // 1) F/NF por programa
+  var porProg={};
+  rowsTodas.forEach(function(x){
+    var k=x.prog||'SIN PROGRAMA';
+    if(!porProg[k]) porProg[k]={f:0,nf:0};
+    if(x.fact==='NF') porProg[k].nf += x.horas||0; else porProg[k].f += x.horas||0;
+  });
+  var progsOrd=Object.keys(porProg).map(function(k){return {k:k,tot:porProg[k].f+porProg[k].nf,f:porProg[k].f,nf:porProg[k].nf};})
+    .sort(function(a,b){return b.tot-a.tot;}).slice(0,15);
+
+  var cnv=document.getElementById('cConAsigProg');
+  if(_cConAsigProg){ try{ _cConAsigProg.destroy(); }catch(e){} _cConAsigProg=null; }
+  if(cnv && window.Chart){
+    _cConAsigProg=new Chart(cnv,{data:{
+      labels:progsOrd.map(function(p){return p.k.length>22?p.k.slice(0,20)+'...':p.k;}),
+      datasets:[
+        {label:'Facturable',data:progsOrd.map(function(p){return Math.round(p.f);}),backgroundColor:'#1D9E75',borderRadius:4,stack:'h'},
+        {label:'No Facturable',data:progsOrd.map(function(p){return Math.round(p.nf);}),backgroundColor:'#BA7517',borderRadius:4,stack:'h'}
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},
+        scales:{x:{stacked:true,ticks:{font:{size:9},maxRotation:60,minRotation:40}},y:{stacked:true,beginAtZero:true,ticks:{font:{size:10},callback:function(v){return v+'h';}}}}}});
+  }
+
+  // 2) Programa x Área x Componente — qué área consumió más horas de cada programa
+  var d=document.getElementById('conAsigDescBody'), dTag=document.getElementById('conAsigDescTag');
+  var byProgArea={};
+  rowsTodas.forEach(function(x){
+    var kp=x.prog||'SIN PROGRAMA', ka=x.area||'SIN ÁREA';
+    if(!byProgArea[kp]) byProgArea[kp]={};
+    if(!byProgArea[kp][ka]) byProgArea[kp][ka]={h:0,comps:{}};
+    byProgArea[kp][ka].h += x.horas||0;
+    var kc=x.comp||'(sin componente)';
+    byProgArea[kp][ka].comps[kc]=(byProgArea[kp][ka].comps[kc]||0)+(x.horas||0);
+  });
+  var filas=[];
+  Object.keys(byProgArea).forEach(function(kp){
+    Object.keys(byProgArea[kp]).forEach(function(ka){
+      var comps=byProgArea[kp][ka].comps;
+      var topComp=Object.keys(comps).sort(function(a,b){return comps[b]-comps[a];})[0] || '-';
+      filas.push({prog:kp, area:ka, horas:byProgArea[kp][ka].h, comp:topComp, compH:comps[topComp]||0});
+    });
+  });
+  filas.sort(function(a,b){return b.horas-a.horas;});
+  if(dTag) dTag.textContent = filas.length+' combinaciones programa+area';
+  if(d){
+    if(!filas.length){
+      d.innerHTML='<div style="padding:10px;color:var(--muted);font-size:11px">Sin datos para '+per+'.</div>';
+    } else {
+      var maxH=filas[0].horas||1;
+      var html='<table style="width:100%;border-collapse:collapse;font-size:11px">'
+        +'<thead><tr style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px">'
+        +'<th style="text-align:left;padding:5px 4px">Programa</th><th style="text-align:left;padding:5px 4px">Area que ejecuto</th>'
+        +'<th style="text-align:right;padding:5px 4px">Horas</th><th style="text-align:left;padding:5px 4px">Componente top</th></tr></thead><tbody>';
+      filas.slice(0,25).forEach(function(r){
+        var pct=Math.round(r.horas/maxH*100);
+        html += '<tr style="border-bottom:1px dashed var(--bdr)">'
+          +'<td style="padding:5px 4px;font-weight:600">'+r.prog+'</td>'
+          +'<td style="padding:5px 4px">'+r.area+'</td>'
+          +'<td style="padding:5px 4px;text-align:right"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">'
+            +'<div style="width:60px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#1D9E75"></div></div>'
+            +'<span style="font-weight:700">'+Math.round(r.horas)+'h</span></div></td>'
+          +'<td style="padding:5px 4px;color:var(--muted)">'+r.comp+' ('+Math.round(r.compH)+'h)</td>'
+          +'</tr>';
+      });
+      html += '</tbody></table>';
+      if(filas.length>25) html += '<div style="margin-top:6px;padding:4px;font-size:10px;color:var(--muted);border-top:1px dashed var(--bdr)">+ '+(filas.length-25)+' combinaciones mas (sin mostrar individualmente)</div>';
+      d.innerHTML=html;
+    }
+  }
 }
 
 function _conRenderAjustes(rows, area, per, hAju, hTot){
@@ -2795,12 +3145,24 @@ function _conRenderTrend(area){
   (DASH.programas_detalle||[]).forEach(function(x){ if(x.area===area) meses[x.p]=true; });
   var ms=Object.keys(meses).sort().slice(-12);
   var labels=[], ejec=[], pres=[], util=[];
+  // v2.9 (2026-09-18) — mismo fix que el KPI de Capacidad de renderConsolidada:
+  // esta gráfica calculaba Laborables con areas_mo_por_periodo[].por_area
+  // (cruce Maestro/Nómina), que devuelve {} vacío para TODOS los períodos
+  // (falla preexistente, no relacionada a este dashboard — ver
+  // decisiones-arquitectura.md D-009/D-010 y la nota de Capacidad más abajo
+  // en este archivo), por eso las barras azules nunca se veían. Regla del
+  // usuario ("no nos compliquemos"): personas con horas en Jira para esa
+  // área+mes × tiempo laboral del mes; si Jira no tiene NINGÚN registro para
+  // esa área+mes, se cae a `usuarios_activos_por_area` (respaldo sin período).
   ms.forEach(function(p){
     var tot=(DASH.programas_detalle||[]).filter(function(x){return x.area===area&&x.p===p;})
       .reduce(function(s,x){return s+(x.horas||0);},0);
-    var res=(DASH.areas_mo_por_periodo||[]).filter(function(r){return r.periodo===p;})[0];
-    var pr=0;
-    if(res && res.por_area && res.por_area[area]){ pr=(res.por_area[area].colab||0)*(res.tiempo_laboral||0); }
+    var tl=(function(){ var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===p;})[0]; return r?(r.tiempo_laboral||0):0; })();
+    var colabJiraM={};
+    (DASH.personas_por_periodo||[]).forEach(function(pp){ if(pp.area===area && pp.p===p && pp.persona) colabJiraM[pp.persona]=true; });
+    var colabM=Object.keys(colabJiraM).length;
+    if(!colabM){ var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0]; colabM=actM?(actM.activos||0):0; }
+    var pr=colabM*tl;
     var mm=parseInt(p.split('-')[1],10);
     labels.push((_MESNOM[mm]||p.split('-')[1]).slice(0,3)+' '+p.split('-')[0].slice(-2));
     ejec.push(Math.round(tot)); pres.push(Math.round(pr));
