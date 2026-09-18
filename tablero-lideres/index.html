@@ -250,23 +250,28 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
         <div class="ptitle" id="conTitle">Mi area</div>
         <div class="psub"><span id="conSubtitle">Selecciona un area y periodo para ver el detalle</span></div>
 
-        <!-- SELECTOR LÍDER (chips, selección única) — un líder puede tener varias
-             áreas independientes (ej. Camilo), así que elegirlo aquí arriba
-             recorta el selector de Área justo abajo a solo las suyas, en vez
-             de vivir como un filtro más dentro de un área ya fija. -->
+        <!-- SELECTOR LÍDER (chips, selección única) — vuelve a existir (v2.7):
+             se había quitado por error el 2026-09-18, la instrucción real fue
+             quitar solo el selector de Área, no el de Líder. -->
         <div class="card" style="margin-bottom:14px">
           <div class="ctitle">Lider</div>
-          <div class="csub">Selecciona un lider para ver solo sus areas · clic de nuevo para quitar el filtro</div>
+          <div class="csub">Selecciona un lider para ver solo su gente · clic de nuevo para quitar el filtro</div>
           <div id="conLiderChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px"></div>
         </div>
 
-        <!-- SELECTOR ÁREA + MES + SALUD -->
+        <!-- SELECTOR MES + ROL/SUB-ÁREA + PERSONA + SALUD.
+             v2.6 (2026-09-18): se quitó el selector de Área. Motivo (decisión
+             del usuario): con Líder + Rol/Sub-área ya alcanza para ubicarse
+             (Rol viene de "Área Meta" en Usuarios_Jira, que en la práctica YA
+             identifica el sub-equipo — "Angular", "Mobile", "Kam", etc.) y el
+             selector de Área era el que sobraba/confundía, no el de Líder.
+             El Área que alimenta los KPIs de este bloque se RESUELVE
+             automáticamente a partir de Líder/Rol/Persona (ver
+             _conResolverArea) — no se le pide al usuario que la elija. Los
+             KPIs específicos por área "oficial" (no por sub-equipo) viven en
+             la otra pestaña (Líderes), que no se tocó. -->
         <div class="card" style="margin-bottom:14px;background:linear-gradient(180deg,rgba(83,74,183,0.04),transparent);border-left:3px solid #534AB7">
           <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-            <div>
-              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Area</div>
-              <select id="conArea" onchange="renderConsolidada()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:180px"></select>
-            </div>
             <div>
               <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Mes</div>
               <select id="conMes" onchange="renderConsolidada()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:130px"></select>
@@ -2352,30 +2357,33 @@ function renderLdrDet(){
 // VISTA CONSOLIDADA — Mi Área (5 bloques con detalle profundo)
 // ============================================================
 
-var conSelArea='', conSelMes='', conCompOpen=null;
+var conSelMes='', conCompOpen=null;
 var _cConTrend=null;
 
 // Filtros de Líder / Rol (sub-área) / Persona — v2.4 (2026-09-18)
-// v2.5 (2026-09-18): Líder pasó de <select> dentro del selector de área a
-// chips de selección única ARRIBA del selector de área. Motivo: un líder
-// (ej. Camilo) puede liderar varias áreas independientes a la vez, así que
-// "líder" no es un sub-filtro DENTRO de un área fija — es al revés: elegir
-// líder debe recortar qué áreas aparecen en el selector de Área. Con el
-// <select> viejo (líder como hijo de área) el usuario podía quedar parado
-// en un área que ese líder no lidera y ver "0 personas", que es el bug
-// reportado. Ahora: elegís líder arriba → el selector de Área se reconstruye
-// solo con sus áreas → Rol/Persona (que sí siguen siendo sub-filtros de
-// área+mes) se pueblan ya consistentes.
+// v2.5: Líder pasó a chips de selección única.
+// v2.6 (2026-09-18): se retiró el selector de Área (por error también se
+// había quitado Líder — corregido en v2.7, ver más abajo). La instrucción
+// real del usuario fue: el que sobraba/confundía era Área, no Líder. Ahora
+// Líder (chips) + Rol/Sub-área + Persona son los filtros visibles; el Área
+// que necesitan los KPIs de este bloque se RESUELVE automáticamente a
+// partir de Líder/Rol/Persona (ver _conResolverArea), nunca se le pide al
+// usuario que la escoja. El usuario confirmó explícitamente que los KPIs de
+// esta pestaña son "información general" (capacidad, ajustes, no
+// facturables) y que los KPIs oficiales por área viven en la pestaña
+// Líderes (no tocada) — así que resolver el área "por detrás" en vez de
+// exigirla como filtro explícito es aceptable aquí.
+// v2.7 (2026-09-18): se restauran los chips de Líder — se habían quitado
+// por error al implementar v2.6.
 // Todo esto lee de DASH.personas_por_periodo (único array del JSON que hoy
 // trae rol/lider/modalidad por persona — ver etl-finops-v2.gs v2.2.4). Los
 // KPIs de arriba (Bloque A) vienen de programas_detalle, que NO tiene
-// dimensión de persona, así que esos números siguen siendo a nivel de área
-// completa aun con estos filtros activos; lo que sí se filtra es todo lo que
-// ya tenía granularidad de persona: el panel de "Personas del área con
-// ajustes" y los cruces de Tiempo / Horas No Facturables (vía rowsPD).
+// dimensión de persona, así que esos números siguen siendo a nivel del área
+// resuelta completa; lo que sí se filtra con granularidad de persona es el
+// panel de "Personas del área con ajustes" y los cruces de Tiempo / Horas
+// No Facturables (vía rowsPD).
 var conSelRol='', conSelLider='', conSelPersona='';
-var _conFiltrosKey='';     // area+'|'+mes de la última vez que se poblaron Rol/Persona
-var _conAreaLiderKey='';   // último conSelLider usado para armar el selector de Área
+var _conFiltrosKey='';     // lider+'|'+mes de la última vez que se poblaron Rol/Persona
 
 // ============================================================================
 // CRUCE DE FILTROS (cross-filter) reutilizable — estilo Power BI.
@@ -2466,27 +2474,24 @@ function _conAjusteRe(s){
 function _conNorm(s){
   return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
 }
-/** Áreas que lidera `lider` (visto en cualquier período de personas_por_periodo). */
-function _conAreasParaLider(lider){
+function _conMesesDisp(){
   var s={};
-  (DASH.personas_por_periodo||[]).forEach(function(p){ if(p.lider===lider && p.area && p.area!=='SIN ÁREA') s[p.area]=true; });
-  return s;
+  (DASH.programas_detalle||[]).forEach(function(x){ if(x.p) s[x.p]=(s[x.p]||0)+(x.horas||0); });
+  return Object.keys(s).filter(function(p){return s[p]>=100;}).sort().reverse();
 }
-function _conAreasDisp(){
-  var s={};
-  (DASH.programas_detalle||[]).forEach(function(x){ if(x.area && x.area!=='SIN ÁREA') s[x.area]=true; });
-  var areas = Object.keys(s).sort();
-  if(conSelLider){
-    var permitidas = _conAreasParaLider(conSelLider);
-    var filtradas = areas.filter(function(a){ return permitidas[a]; });
-    // Si por algún motivo no hay match (ej. nombre de área distinto entre
-    // programas_detalle y personas_por_periodo), no dejamos el selector
-    // vacío — mejor mostrar todas que romper la vista.
-    if(filtradas.length) return filtradas;
+function _conPoblarSelectores(){
+  var selM=document.getElementById('conMes');
+  if(!selM) return;
+  if(!selM.options.length){
+    var meses=_conMesesDisp();
+    selM.innerHTML=meses.map(function(m){var mm=parseInt(m.split('-')[1],10);return '<option value="'+m+'">'+(_MESNOM[mm]||m.split('-')[1])+' '+m.split('-')[0]+'</option>';}).join('');
+    if(!conSelMes && meses.length) conSelMes=meses[0];
+    selM.value=conSelMes;
   }
-  return areas;
+  conSelMes=selM.value;
 }
-/** Lideres distintos vistos en cualquier período (no solo el mes seleccionado). */
+
+/** Lideres distintos vistos en cualquier período de personas_por_periodo. */
 function _conLideresDisp(){
   var s={};
   (DASH.personas_por_periodo||[]).forEach(function(p){ if(p.lider) s[p.lider]=true; });
@@ -2500,66 +2505,68 @@ function _conRenderLiderChips(){
     return '<span onclick="_conLiderToggle(\''+l.replace(/'/g,"\\'")+'\')" style="cursor:pointer;font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid '+(on?'#534AB7':'var(--bdr)')+';background:'+(on?'#534AB7':'var(--surf)')+';color:'+(on?'#fff':'var(--txt)')+'">'+(on?'✓ ':'')+l+'</span>';
   }).join('') + (conSelLider ? '<span onclick="_conLiderToggle(\'\')" style="cursor:pointer;font-size:11px;padding:4px 10px;color:var(--muted)">Limpiar</span>' : '');
 }
-/** Clic en un chip de líder: selección única (clic de nuevo lo quita). Cambiar de líder invalida el área elegida — se limpia para forzar reselección dentro de las suyas. */
+/** Clic en un chip de líder: selección única (clic de nuevo lo quita). Cambiar de líder invalida Rol/Persona elegidos — se limpian para forzar reselección dentro de su gente. */
 function _conLiderToggle(nombre){
   conSelLider = (conSelLider===nombre) ? '' : nombre;
-  conSelArea = '';
+  conSelRol=''; conSelPersona='';
   renderConsolidada();
-}
-function _conMesesDisp(){
-  var s={};
-  (DASH.programas_detalle||[]).forEach(function(x){ if(x.p) s[x.p]=(s[x.p]||0)+(x.horas||0); });
-  return Object.keys(s).filter(function(p){return s[p]>=100;}).sort().reverse();
-}
-function _conPoblarSelectores(){
-  var selA=document.getElementById('conArea'), selM=document.getElementById('conMes');
-  if(!selA||!selM) return;
-  if(!selM.options.length){
-    var meses=_conMesesDisp();
-    selM.innerHTML=meses.map(function(m){var mm=parseInt(m.split('-')[1],10);return '<option value="'+m+'">'+(_MESNOM[mm]||m.split('-')[1])+' '+m.split('-')[0]+'</option>';}).join('');
-    if(!conSelMes && meses.length) conSelMes=meses[0];
-    selM.value=conSelMes;
-  }
-  // Si el líder elegido (chips arriba) cambió desde la última vez que se
-  // armó este selector, se reconstruye desde cero: las opciones y el
-  // default anterior pueden no aplicar al nuevo líder.
-  if(_conAreaLiderKey !== conSelLider){
-    _conAreaLiderKey = conSelLider;
-    selA.innerHTML = '';
-    conSelArea = '';
-  }
-  if(!selA.options.length){
-    var areas=_conAreasDisp();
-    selA.innerHTML=areas.map(function(a){return '<option>'+a+'</option>';}).join('');
-    if(!conSelArea && areas.length){
-      // Default: área con más horas del mes, restringida a las `areas`
-      // disponibles ahora mismo (si hay un líder elegido en los chips, ya
-      // vienen filtradas a las suyas — si no se restringe aquí también, el
-      // default podía "escaparse" a un área ajena con más horas que las
-      // del líder, dejando el selector desincronizado con el filtro).
-      var ha={};
-      (DASH.programas_detalle||[]).forEach(function(x){ if(x.p===conSelMes && areas.indexOf(x.area)>=0) ha[x.area]=(ha[x.area]||0)+(x.horas||0); });
-      var top=Object.keys(ha).sort(function(a,b){return ha[b]-ha[a];})[0];
-      conSelArea = top || areas[0];
-    }
-    selA.value=conSelArea;
-  }
-  conSelArea=selA.value; conSelMes=selM.value;
 }
 
 /**
- * Puebla los selects de Rol/Persona a partir de personas_por_periodo del
- * área+mes actualmente seleccionados (el líder ya no vive aquí — ver chips
- * arriba y _conLiderToggle). Si el área o el mes cambiaron desde la última
- * vez (nueva `key`), se resetean Rol/Persona a "Todos/Todas" — un rol o
- * persona de un área ya no tiene sentido al cambiar de área. El líder
- * elegido en los chips NUNCA se resetea aquí: solo lo tocan los chips.
+ * Resuelve qué Área usar para los KPIs de este bloque, a partir de
+ * Líder/Rol/Persona elegidos — ya no existe un selector de Área explícito.
+ *   1. Si hay Persona elegida: el área donde aparece esa persona ese mes.
+ *   2. Si hay Rol elegido (sin persona): el área con más horas entre la
+ *      gente de ese rol ese mes — un rol como "Angular" en la práctica cae
+ *      siempre en una sola área, pero por seguridad se toma la de más peso.
+ *   3. Si hay Líder elegido (sin rol ni persona): el área con más horas
+ *      entre la gente de ese líder ese mes — cubre el caso de un líder con
+ *      varias áreas independientes (ej. Camilo): se muestra la que más pesa.
+ *   4. Sin ningún filtro: el área con más horas del mes en general (mismo
+ *      default histórico de cuando existía el selector de Área).
  */
-function _conPoblarFiltrosPersona(area, per){
+function _conResolverArea(per){
+  if(conSelPersona){
+    var found=(DASH.personas_por_periodo||[]).filter(function(p){return p.p===per && p.persona===conSelPersona;})[0];
+    if(found && found.area) return found.area;
+  }
+  if(conSelRol){
+    var horasPorArea={};
+    (DASH.personas_por_periodo||[]).forEach(function(p){
+      if(p.p===per && p.rol===conSelRol && (!conSelLider || p.lider===conSelLider) && p.area){
+        horasPorArea[p.area] = (horasPorArea[p.area]||0) + (p.hF||0) + (p.hNF||0);
+      }
+    });
+    var topRol=Object.keys(horasPorArea).sort(function(a,b){return horasPorArea[b]-horasPorArea[a];})[0];
+    if(topRol) return topRol;
+  }
+  if(conSelLider){
+    var horasPorAreaL={};
+    (DASH.personas_por_periodo||[]).forEach(function(p){
+      if(p.p===per && p.lider===conSelLider && p.area){
+        horasPorAreaL[p.area] = (horasPorAreaL[p.area]||0) + (p.hF||0) + (p.hNF||0);
+      }
+    });
+    var topLider=Object.keys(horasPorAreaL).sort(function(a,b){return horasPorAreaL[b]-horasPorAreaL[a];})[0];
+    if(topLider) return topLider;
+  }
+  var ha={};
+  (DASH.programas_detalle||[]).forEach(function(x){ if(x.p===per && x.area && x.area!=='SIN ÁREA') ha[x.area]=(ha[x.area]||0)+(x.horas||0); });
+  return Object.keys(ha).sort(function(a,b){return ha[b]-ha[a];})[0] || '';
+}
+
+/**
+ * Puebla los selects de Rol/Persona a partir de personas_por_periodo del mes
+ * actualmente seleccionado, respetando el Líder elegido en los chips (ya no
+ * dependen de un área elegida, porque el área ya no se elige, se resuelve).
+ * Si el mes o el líder cambiaron desde la última vez (nueva `key`), se
+ * resetean Rol/Persona a "Todos/Todas".
+ */
+function _conPoblarFiltrosPersona(per){
   var selR=document.getElementById('conRol'), selP=document.getElementById('conPersonaSel');
   if(!selR||!selP) return;
-  var key = area+'|'+per;
-  var personasArea = (DASH.personas_por_periodo||[]).filter(function(p){return p.area===area && p.p===per;});
+  var key = conSelLider+'|'+per;
+  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return p.p===per && (!conSelLider || p.lider===conSelLider);});
 
   if(key !== _conFiltrosKey){
     _conFiltrosKey = key;
@@ -2567,13 +2574,11 @@ function _conPoblarFiltrosPersona(area, per){
   }
 
   var roles={};
-  personasArea.forEach(function(p){ if(p.rol) roles[p.rol]=true; });
+  personasMes.forEach(function(p){ if(p.rol) roles[p.rol]=true; });
   selR.innerHTML = '<option value="">Todos</option>' + Object.keys(roles).sort().map(function(r){return '<option'+(r===conSelRol?' selected':'')+'>'+r+'</option>';}).join('');
 
-  // Persona: respeta rol (y líder, por si un área tuviera gente de más de un líder)
-  var personasFiltradas = personasArea.filter(function(p){
-    return (!conSelRol || p.rol===conSelRol) && (!conSelLider || p.lider===conSelLider);
-  });
+  // Persona: respeta el rol ya elegido, para no mostrar gente fuera del filtro activo
+  var personasFiltradas = personasMes.filter(function(p){ return !conSelRol || p.rol===conSelRol; });
   var nombres={};
   personasFiltradas.forEach(function(p){ if(p.persona) nombres[p.persona]=true; });
   if(conSelPersona && !nombres[conSelPersona]) conSelPersona='';  // ya no aplica con el rol elegido
@@ -2592,16 +2597,16 @@ function _conFiltroChange(){
 
 /**
  * Devuelve el set (objeto {nombre:true}) de personas que cumplen los filtros
- * de Rol/Lider/Persona actualmente activos, dentro del área+mes dados.
- * Se usa para filtrar `personas_detalle` (que no trae rol/lider propios,
+ * de Líder/Rol/Persona actualmente activos, dentro del área+mes dados.
+ * Se usa para filtrar `personas_detalle` (que no trae esos campos propios,
  * ver decisiones-arquitectura.md) por nombre de persona.
  */
 function _conPersonasPermitidas(area, per){
   var set={};
   (DASH.personas_por_periodo||[]).filter(function(p){
     return p.area===area && p.p===per
-      && (!conSelRol || p.rol===conSelRol)
       && (!conSelLider || p.lider===conSelLider)
+      && (!conSelRol || p.rol===conSelRol)
       && (!conSelPersona || p.persona===conSelPersona);
   }).forEach(function(p){ if(p.persona) set[p.persona]=true; });
   return set;
@@ -2611,11 +2616,13 @@ function renderConsolidada(){
   if(!DASH) return;
   _conRenderLiderChips();
   _conPoblarSelectores();
-  if(!conSelArea||!conSelMes) return;
+  if(!conSelMes) return;
+  _conPoblarFiltrosPersona(conSelMes);
 
-  var area=conSelArea, per=conSelMes;
-  _conPoblarFiltrosPersona(area, per);
-  var filtroPersonaActivo = !!(conSelRol || conSelLider || conSelPersona);
+  var per=conSelMes;
+  var area=_conResolverArea(per);
+  if(!area) return;
+  var filtroPersonaActivo = !!(conSelLider || conSelRol || conSelPersona);
   var personasPermitidas = filtroPersonaActivo ? _conPersonasPermitidas(area, per) : null;
   document.getElementById('conTitle').textContent = area;
   document.getElementById('conSubtitle').textContent = 'Vista consolidada de ' + area + ' — ' + per;
@@ -2677,7 +2684,7 @@ function renderConsolidada(){
   _conRenderTrend(area);
 
   // BLOQUE AJUSTES DETALLADO
-  _conRenderAjustes(rows, per, hAju, hTot);
+  _conRenderAjustes(rows, area, per, hAju, hTot);
 
   // BLOQUE 🅒 / 🅓 — En qué se fue el tiempo · Horas No Facturables
   // Fuente preferida: personas_detalle (tiene persona+programa+componente).
@@ -2700,7 +2707,7 @@ function renderConsolidada(){
   _conRenderCompromiso(area, per);
 }
 
-function _conRenderAjustes(rows, per, hAju, hTot){
+function _conRenderAjustes(rows, area, per, hAju, hTot){
   var d=document.getElementById('conAjuBody'); if(!d) return;
   var tag=document.getElementById('conAjuTag');
   var ajusteRows = rows.filter(function(x){return _conAjusteRe(x.comp);});
@@ -2722,9 +2729,9 @@ function _conRenderAjustes(rows, per, hAju, hTot){
 
   // Personas asociadas (aprox): personas_por_periodo con hAjustes>0 del area/mes
   var personas=(DASH.personas_por_periodo||[]).filter(function(p){
-    return p.area===conSelArea&&p.p===per&&(p.hAjustes||0)>0
-      && (!conSelRol || p.rol===conSelRol)
+    return p.area===area&&p.p===per&&(p.hAjustes||0)>0
       && (!conSelLider || p.lider===conSelLider)
+      && (!conSelRol || p.rol===conSelRol)
       && (!conSelPersona || p.persona===conSelPersona);
   }).sort(function(a,b){return b.hAjustes-a.hAjustes;});
 
