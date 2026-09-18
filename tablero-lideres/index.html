@@ -2638,19 +2638,36 @@ function renderConsolidada(){
     if(x.prog) progsSet[x.prog]=true;
   });
 
-  // Capacidad (personas y horas del área)
-  var res=(DASH.areas_mo_por_periodo||[]).filter(function(r){return r.periodo===per;})[0];
-  var pres=0, colab=0, tl=0;
-  if(res && res.por_area && res.por_area[area]){
-    colab=res.por_area[area].colab||0;
-    tl=res.tiempo_laboral||0;
-    pres=colab * tl;
+  // Capacidad (personas y horas del área).
+  // v2.8 (2026-09-18): antes salía de areas_mo_por_periodo (colaboradores MOD
+  // de la Nómina cruzados con el Maestro) — ese cruce está devolviendo 0 en
+  // TODOS los períodos (falla de cruce Maestro/Nómina, no relacionada con
+  // este dashboard; ver decisiones-arquitectura.md), por eso Capacidad
+  // siempre mostraba "0 pers". Nueva regla (decisión del usuario): Jira
+  // manda — si hay gente con horas registradas en Jira para esta área+mes,
+  // esa es la capacidad. Solo si Jira no tiene NINGÚN registro para esta
+  // área+mes (puede pasar) se cae a la base de usuarios activos de
+  // Usuarios_Jira para esa área (usuarios_activos_por_area, ver .gs) — un
+  // respaldo sin período (no un histórico), mejor que mostrar 0.
+  var tl = (function(){
+    var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===per;})[0];
+    return r ? (r.tiempo_laboral||0) : 0;
+  })();
+  var colabJira = {};
+  (DASH.personas_por_periodo||[]).forEach(function(p){ if(p.area===area && p.p===per && p.persona) colabJira[p.persona]=true; });
+  var colab = Object.keys(colabJira).length;
+  var capacidadFuente = 'jira';
+  if (!colab){
+    var actFallback=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0];
+    colab = actFallback ? (actFallback.activos||0) : 0;
+    capacidadFuente = 'activos';
   }
+  var pres = colab * tl;
 
   // KPI de utilización (salud)
   var util = pres ? hTot/pres*100 : null;
   var saludEl=document.getElementById('conSalud'), saludSub=document.getElementById('conSaludSub');
-  if(util==null){ saludEl.textContent='s/d'; saludEl.style.color='var(--muted)'; saludSub.textContent='sin nomina del mes'; }
+  if(util==null){ saludEl.textContent='s/d'; saludEl.style.color='var(--muted)'; saludSub.textContent='sin capacidad calculable'; }
   else {
     saludEl.textContent = Math.round(util)+'%';
     saludEl.style.color = util>100?'#A32D2D': util>=85?'#1D9E75': util>=60?'#BA7517':'#185FA5';
@@ -2660,7 +2677,7 @@ function renderConsolidada(){
   // BLOQUE 🅐 — 6 KPIs
   function _s(id,v){var e=document.getElementById(id); if(e) e.textContent=v;}
   _s('conKCap', colab+' pers');
-  _s('conKCapSub', Math.round(pres).toLocaleString('es-CO')+'h · '+tl+'h/pers');
+  _s('conKCapSub', Math.round(pres).toLocaleString('es-CO')+'h · '+tl+'h/pers'+(capacidadFuente==='activos'?' · s/ registro en Jira, usa activos':''));
   _s('conKProy', Object.keys(progsSet).length);
   _s('conKProySub', 'programas con horas del area');
   _s('conKEjec', Math.round(hTot).toLocaleString('es-CO')+'h');
