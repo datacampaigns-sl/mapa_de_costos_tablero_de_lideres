@@ -27,13 +27,20 @@
 //    respaldo embebido ("⚠ Data local (no Drive)"). JSON con muchas claves
 //    repetidas (como este) comprime típicamente 70-90% con gzip — suficiente
 //    para volver a caber bajo el límite sin quitar ni un dato del ETL.
-//    Ver decisiones-arquitectura.md para el detalle de por qué se eligió
-//    gzip aquí en vez de recortar la ventana de datos o redirigir a Drive.
+//
+//  CORRECCIÓN v2.3.4 (2026-09-18) — comprimir SIEMPRE, sin depender de
+//    "Accept-Encoding" del request. La v2.3.3 solo comprimía si detectaba
+//    ese header en `event.headers`, pero en el camino real (`/api/data` →
+//    redirect interno de netlify.toml → función) ese header no llegó como
+//    se esperaba, así que siempre caía a la rama SIN comprimir — mismo
+//    crash de siempre, bytes idénticos. Casi cualquier cliente HTTP moderno
+//    decodifica gzip sin pedirlo explícitamente, así que ya no se verifica
+//    nada: se comprime incondicionalmente.
 // ============================================================================
 
 const zlib = require('zlib');
 
-exports.handler = async (event) => {
+exports.handler = async () => {
   const url = process.env.DRIVE_JSON_URL ||
     (process.env.DRIVE_FILE_ID
       ? 'https://drive.google.com/uc?export=download&id=' + process.env.DRIVE_FILE_ID
@@ -64,37 +71,19 @@ exports.handler = async (event) => {
 
     const jsonStr = JSON.stringify(data);
 
-    // Casi todo navegador/cliente manda "Accept-Encoding: gzip" — comprimimos
-    // siempre que lo acepte para no volver a chocar con el tope de 6MB.
-    // Si por algo viniera sin ese header, se sirve sin comprimir como respaldo
-    // (mismo riesgo de tamaño que antes, pero nunca peor que el comportamiento
-    // previo a este cambio).
-    const headers = (event && event.headers) || {};
-    const acceptEnc = String(headers['accept-encoding'] || headers['Accept-Encoding'] || '');
-    const puedeGzip = acceptEnc.toLowerCase().indexOf('gzip') >= 0;
-
-    if (puedeGzip) {
-      const comprimido = zlib.gzipSync(Buffer.from(jsonStr, 'utf-8'));
-      return {
-        statusCode: 200,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Content-Encoding': 'gzip',
-          // El ETL corre 1 vez/día: 5 min de caché evita golpear Drive en cada visita.
-          'Cache-Control': 'public, max-age=300, must-revalidate',
-        },
-        isBase64Encoded: true,
-        body: comprimido.toString('base64'),
-      };
-    }
-
+    // v2.3.4: comprimir SIEMPRE (ver nota arriba) — nunca condicionado a un
+    // header que no podemos garantizar que llegue por el camino del redirect.
+    const comprimido = zlib.gzipSync(Buffer.from(jsonStr, 'utf-8'));
     return {
       statusCode: 200,
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
+        'Content-Encoding': 'gzip',
+        // El ETL corre 1 vez/día: 5 min de caché evita golpear Drive en cada visita.
         'Cache-Control': 'public, max-age=300, must-revalidate',
       },
-      body: jsonStr,
+      isBase64Encoded: true,
+      body: comprimido.toString('base64'),
     };
   } catch (e) {
     return json(502, { error: 'No se pudo leer el JSON desde Drive: ' + e.message });
