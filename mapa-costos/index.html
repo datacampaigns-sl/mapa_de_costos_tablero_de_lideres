@@ -156,6 +156,11 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
         <span onclick="_cambiarModo('mensual')" id="modoBtnMensual" style="padding:3px 8px;border-radius:5px;cursor:pointer">Mensual</span>
         <span onclick="_cambiarModo('anual')" id="modoBtnAnual" style="padding:3px 8px;border-radius:5px;cursor:pointer">Consolidado</span>
       </div>
+      <!-- v2.14 (2026-09-21): selector de tipo de ingreso (recaudado /
+           facturado / causado, cada uno ejecutado o presupuestado). Cambia
+           ingresos/utilidad/margen en TODO el dashboard — ver
+           _cambiarTipoIngreso() y FinOpsAdapter.ingresosPorTipo(). -->
+      <select class="hdr-select" id="selTipoIngreso" title="Tipo de ingreso"></select>
       <div class="hdr-btn" onclick="navTo('ia')"><div class="dot-live"></div><i class="ti ti-robot" style="font-size:13px"></i> Asistente IA</div>
       <button class="theme-btn" onclick="toggleTheme()" title="Cambiar tema"><i class="ti ti-moon" id="themeIcon"></i></button>
     </div>
@@ -200,7 +205,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
         </div>
 
         <div class="kgrid">
-          <div class="kc"><div class="klbl">Ingresos</div><div class="kval" id="kIng">-</div><div class="kdelta nu">causado (mes)</div><div class="kico gr"><i class="ti ti-trending-up"></i></div></div>
+          <div class="kc"><div class="klbl">Ingresos</div><div class="kval" id="kIng">-</div><div class="kdelta nu" id="kIngSub">causado (mes)</div><div class="kico gr"><i class="ti ti-trending-up"></i></div></div>
           <div class="kc"><div class="klbl">Costo total</div><div class="kval" id="kCostoT">-</div><div class="kdelta nu">MOD+MOI+C&G</div><div class="kico am"><i class="ti ti-receipt-2"></i></div></div>
           <div class="kc"><div class="klbl">Utilidad</div><div class="kval" id="kUtil">-</div><div class="kdelta nu">ingresos - costo</div><div class="kico bl"><i class="ti ti-cash"></i></div></div>
           <div class="kc"><div class="klbl">Margen</div><div class="kval" id="kMargen">-</div><div class="kdelta nu">utilidad / ingresos</div><div class="kico pu"><i class="ti ti-percentage"></i></div></div>
@@ -1460,9 +1465,12 @@ function progLimpiar(){ progFiltro={prog:'',area:''}; renderProgramas(); }
 function _progAno(){ return VM?VM.periodoSel.split('-')[0]:''; }
 function _progAll(){ var y=_progAno(); return (DASH.programas_detalle||[]).filter(function(x){return x.p.split('-')[0]===y;}); }
 function _vhAreaProg(area,per,nivel){ var v=_vhAreaMes(area,per,nivel); return v||_vhCompanyMes(per,nivel); }
+// v2.14 — ingresos por programa (rentabilidad de Programas/Áreas) según el
+// tipo de ingreso seleccionado en el header, no el default fijo de antes.
 function _ingMap(){ var m={},y=_progAno();
-  (DASH.ingresos_por_periodo||[]).filter(function(x){return x.periodo.split('-')[0]===y;}).forEach(function(x){
-    var pp=x.por_programa||{}; for(var k in pp){ if(pp.hasOwnProperty(k)){ var kk=_kn(k); m[kk]=(m[kk]||0)+pp[k]; } } });
+  var ingByP=_ingresosTipoMap();
+  Object.keys(ingByP).filter(function(p){return p.split('-')[0]===y;}).forEach(function(p){
+    var pp=ingByP[p].por_programa||{}; for(var k in pp){ if(pp.hasOwnProperty(k)){ var kk=_kn(k); m[kk]=(m[kk]||0)+pp[k]; } } });
   return m;
 }
 function _progCalc(){
@@ -1515,16 +1523,17 @@ function renderProgramas(){
   if(selA){ var areas={}; _progAll().forEach(function(x){areas[x.area]=true;}); var ak=Object.keys(areas).sort();
     selA.innerHTML='<option value="">Todas</option>'+ak.map(function(a){return '<option'+(progFiltro.area===a?' selected':'')+'>'+a+'</option>';}).join('');
     selA.onchange=function(){progFiltro.area=selA.value; renderProgramas();}; }
-  // Rentabilidad global de la compañía
+  // Rentabilidad global de la compañía — ingresos según el tipo elegido
+  // en el header (ver TIPO_INGRESO_SEL / _resumenTipo()).
   var _gMod=0,_gMoi=0,_gCyg=0,_gIng=0,_gMeses=0;
-  (DASH.resumen_por_periodo||[]).forEach(function(r){
+  (_resumenTipo()||[]).forEach(function(r){
     if(r.periodo.split('-')[0]!==ano) return;
     if(!(r.mod||0)) return;
     _gMod+=r.mod||0; _gMoi+=r.moi||0; _gCyg+=r.costos_gastos||0; _gIng+=r.ingresos||0; _gMeses++;
   });
   var _gNom=_gMod+_gMoi, _gCosto=_gNom+_gCyg, _gUti=_gIng-_gCosto, _gMar=_gIng?_gUti/_gIng*100:0;
   set('pgGloAno',ano+' - '+_gMeses+' meses con nomina');
-  set('pgGIng',fmtM(_gIng)); set('pgGIngSub','causado por facturacion');
+  set('pgGIng',fmtM(_gIng)); set('pgGIngSub',_tipoIngresoLabel());
   set('pgGNom',fmtM(_gNom)); set('pgGNomSub','MOD '+fmtM(_gMod)+' + MOI '+fmtM(_gMoi));
   set('pgGCyG',fmtM(_gCyg));
   set('pgGUti',fmtM(_gUti)); set('pgGUtiSub','margen '+_gMar.toFixed(1)+'%');
@@ -1587,7 +1596,7 @@ function renderProgRecon(ing,cF,cNF,rF,rAll,cInt,carga,cTot,ano){
   var d=document.getElementById('progRecon'); if(!d) return;
   // Costo real de la compañía (nomina + C&G) para el año
   var mod=0, moi=0, cyg=0, ingR=0;
-  (DASH.resumen_por_periodo||[]).forEach(function(r){
+  (_resumenTipo()||[]).forEach(function(r){
     if(r.periodo.split('-')[0]!==ano) return;
     if(!(r.mod||0)) return;
     mod+=r.mod||0; moi+=r.moi||0; cyg+=r.costos_gastos||0; ingR+=r.ingresos||0;
@@ -2115,12 +2124,80 @@ async function sendChat(){
   var M = 1e6;
   function r2(n){ return Math.round(n*100)/100; }
 
+  // v2.14 (2026-09-21) — Selector de tipo de ingreso. El ETL v2.13 expone
+  // `ingresos_tipos_por_periodo` con 7 tipos (recaudado, facturado y causado,
+  // cada uno ejecutado/presupuestado según el concepto); `causado_ejecutado`
+  // es el default histórico (el mismo que antes venía fijo en
+  // `ingresos_por_periodo`/`resumen_por_periodo.ingresos`). Ver D-014.
+  var DEFAULT_TIPO_INGRESO = 'causado_ejecutado';
+  // Respaldo por si el JSON cargado es de un ETL anterior a v2.13 y no trae
+  // `_meta.ingreso_tipos` — mismas 7 claves/etiquetas que `INGRESO_CONCEPTOS`
+  // en el ETL, para que el selector del header siempre tenga opciones.
+  var INGRESO_TIPOS_FALLBACK = [
+    { key:'recaudado',               label:'Recaudado',               default:false },
+    { key:'facturado_ejecutado',     label:'Facturado (ejecutado)',   default:false },
+    { key:'facturado_presupuestado', label:'Facturado (presupuestado)', default:false },
+    { key:'causado_ejecutado',       label:'Causado (ejecutado)',     default:true },
+    { key:'causado_optimista',       label:'Causado (optimista)',     default:false },
+    { key:'causado_acida',           label:'Causado (ácida)',         default:false },
+    { key:'causado_intermedio',      label:'Causado (intermedio)',    default:false }
+  ];
+  function tiposDisponibles(data){
+    var m = data && data._meta && data._meta.ingreso_tipos;
+    return (m && m.length) ? m : INGRESO_TIPOS_FALLBACK;
+  }
+  /**
+   * Devuelve, por período, `{total, por_programa}` del tipo de ingreso
+   * pedido — fuente `ingresos_tipos_por_periodo` (ETL v2.13+). Si el ETL
+   * cargado es más viejo y no trae ese campo, cae al legado
+   * `ingresos_por_periodo` (que siempre representa `causado_ejecutado`,
+   * el único tipo que existía antes de v2.13) — así un JSON viejo sigue
+   * mostrando el dashboard igual que antes, sin selector funcional.
+   */
+  function ingresosPorTipo(data, tipo){
+    tipo = tipo || DEFAULT_TIPO_INGRESO;
+    var tiposArr = data && data.ingresos_tipos_por_periodo;
+    var out = {};
+    if (tiposArr && tiposArr.length){
+      tiposArr.forEach(function(x){
+        var t = (x.tipos||{})[tipo];
+        out[x.periodo] = t ? { total:t.total||0, por_programa:t.por_programa||{} } : { total:0, por_programa:{} };
+      });
+    } else {
+      (data && data.ingresos_por_periodo || []).forEach(function(x){
+        out[x.periodo] = { total:x.total||0, por_programa:x.por_programa||{} };
+      });
+    }
+    return out;
+  }
+  /**
+   * Devuelve `resumen_por_periodo` con `ingresos`/`utilidad`/`margen_pct`
+   * recalculados para el tipo de ingreso pedido — el resto de campos (mod,
+   * moi, costos_gastos, vh_*, colaboradores_mod, horas...) se copian tal
+   * cual, porque no dependen del tipo de ingreso. `utilidad`/`margen_pct` se
+   * recalculan sobre el costo total real del período (mod+moi+costos_gastos),
+   * nunca se leen del ETL (que solo los calculó para el tipo default).
+   */
+  function resumenConTipo(data, tipo){
+    var ingByP = ingresosPorTipo(data, tipo);
+    return (data && data.resumen_por_periodo || []).map(function(r){
+      var ing = (ingByP[r.periodo]||{}).total || 0;
+      var costoT = (r.mod||0)+(r.moi||0)+(r.costos_gastos||0);
+      var util = ing - costoT;
+      var margen = ing ? r2(util/ing*100) : null;
+      var out = {}; for (var k in r) { if (r.hasOwnProperty(k)) out[k] = r[k]; }
+      out.ingresos = ing; out.utilidad = util; out.margen_pct = margen;
+      return out;
+    });
+  }
+
   /**
    * @param data  objeto dashboard_data.json
-   * @param opts  { ventana:5, periodo:'2026-04' }  (periodo = mes seleccionado)
+   * @param opts  { ventana:5, periodo:'2026-04', tipoIngreso:'causado_ejecutado' }
    */
   function buildVM(data, opts){
     opts = opts || {};
+    var tipoSel = opts.tipoIngreso || DEFAULT_TIPO_INGRESO;
     var resumen = data.resumen_por_periodo || [];
     // Períodos con nómina real (mod>0) — el foco del dashboard
     var conNomina = resumen.filter(function(r){ return (r.mod||0) > 0; });
@@ -2134,16 +2211,23 @@ async function sendChat(){
     resumen.forEach(function(r){ byP[r.periodo] = r; });
     var areasByP = {}; (data.areas_por_periodo||[]).forEach(function(a){ areasByP[a.periodo]=a; });
     var egrByP   = {}; (data.egresos_por_periodo||[]).forEach(function(e){ egrByP[e.periodo]=e; });
-    var ingByP   = {}; (data.ingresos_por_periodo||[]).forEach(function(i){ ingByP[i.periodo]=i; });
+    // v2.14 — ingByP depende del tipo de ingreso seleccionado, no solo del
+    // default que traía `ingresos_por_periodo` (ver ingresosPorTipo arriba).
+    var ingByP   = ingresosPorTipo(data, tipoSel);
 
     var periodos = win.map(function(r){ return r.periodo; });
     var meses = periodos.map(etiquetaMes);
 
-    // Series por mes (en millones para las gráficas)
+    // Series por mes (en millones para las gráficas) — ingresos/margen ya
+    // recalculados según el tipo elegido, costo total del mes tal cual.
     var cgo = win.map(function(r){ return r2(r.costos_gastos/M); });
     var nom = win.map(function(r){ return r2((r.mod + r.moi)/M); });
-    var ingresos = win.map(function(r){ return r2((r.ingresos||0)/M); });
-    var margen = win.map(function(r){ return r.margen_pct; });
+    var ingresos = win.map(function(r){ return r2(((ingByP[r.periodo]&&ingByP[r.periodo].total)||0)/M); });
+    var margen = win.map(function(r){
+      var ing = (ingByP[r.periodo]&&ingByP[r.periodo].total)||0;
+      var costoP = (r.mod||0)+(r.moi||0)+(r.costos_gastos||0);
+      return ing ? r2((ing-costoP)/ing*100) : null;
+    });
 
     // Distribución nómina vs C&G del mes seleccionado
     var nomSel = sel.mod + sel.moi, cgSel = sel.costos_gastos, base = nomSel + cgSel;
@@ -2193,19 +2277,26 @@ async function sendChat(){
       Object.keys(eSel.por_categoria||{}).forEach(function(k){ egrCat[k] = r2(eSel.por_categoria[k]/M); });
     }
 
-    // Ingresos por programa (mes seleccionado)
+    // Ingresos por programa (mes seleccionado) — ya según el tipo elegido
     var ingProg = {};
-    var iSel = ingByP[periodoSel];
-    if (iSel){ Object.keys(iSel.por_programa||{}).forEach(function(k){ ingProg[k]=r2(iSel.por_programa[k]/M); }); }
+    var iSel = ingByP[periodoSel] || { total:0, por_programa:{} };
+    Object.keys(iSel.por_programa||{}).forEach(function(k){ ingProg[k]=r2(iSel.por_programa[k]/M); });
 
     // Horas Jira reales desde programas_detalle (fuente completa)
     var hjDet = {}; (data.programas_detalle||[]).forEach(function(x){ hjDet[x.p]=(hjDet[x.p]||0)+(x.horas||0); });
-    // KPIs del mes seleccionado (valores exactos, en pesos)
+    // KPIs del mes seleccionado (valores exactos, en pesos) — ingresos del
+    // tipo elegido; utilidad/margen SIEMPRE recalculados aquí (nunca leídos
+    // de `sel.utilidad`/`sel.margen_pct`, que el ETL solo calculó para el
+    // tipo default) para que queden consistentes con el tipo seleccionado.
+    var costoTotalSel = (sel.mod||0)+(sel.moi||0)+(sel.costos_gastos||0);
+    var ingresosSel = iSel.total || 0;
+    var utilidadSel = ingresosSel - costoTotalSel;
+    var margenSel = ingresosSel ? r2(utilidadSel/ingresosSel*100) : null;
     var kpis = {
       periodo: periodoSel,
       mod: sel.mod||0, moi: sel.moi||0, costos_gastos: sel.costos_gastos||0,
-      costo_total: (sel.mod||0)+(sel.moi||0)+(sel.costos_gastos||0),
-      ingresos: sel.ingresos||0, utilidad: sel.utilidad||0, margen_pct: sel.margen_pct,
+      costo_total: costoTotalSel,
+      ingresos: ingresosSel, utilidad: utilidadSel, margen_pct: margenSel,
       vh_mod: sel.vh_mod||0, vh_mod_moi: sel.vh_mod_moi||0, vh_full: sel.vh_full||0,
       colaboradores_mod: sel.colaboradores_mod||0, tiempo_laboral: sel.tiempo_laboral||0,
       horas_disponibles: sel.horas_disponibles||0, horas_jira: (sel.horas_jira|| hjDet[periodoSel] ||0)
@@ -2218,7 +2309,7 @@ async function sendChat(){
       vh: vh, vhTrend: vhTrend,
       progs: progs, progMes: progMes,
       areasNomTot: areasNomTot, egrRubro: egrRubro, egrCat: egrCat, ingProg: ingProg,
-      kpis: kpis,
+      kpis: kpis, tipoIngreso: tipoSel,
       aniosDisponibles: aniosDe(resumen), mesesDe: mesesPorAnio(conNomina)
     };
   }
@@ -2259,12 +2350,14 @@ async function sendChat(){
    *     programa / programas por costo-horas: SUMA across todos los meses
    *     del año (son montos, sí se pueden sumar).
    */
-  function buildVMAnual(data, anio){
+  function buildVMAnual(data, anio, tipo){
+    var tipoSel = tipo || DEFAULT_TIPO_INGRESO;
     var resumen = data.resumen_por_periodo || [];
     var byP = {}; resumen.forEach(function(r){ byP[r.periodo] = r; });
     var areasByP = {}; (data.areas_por_periodo||[]).forEach(function(a){ areasByP[a.periodo]=a; });
     var egrByP   = {}; (data.egresos_por_periodo||[]).forEach(function(e){ egrByP[e.periodo]=e; });
-    var ingByP   = {}; (data.ingresos_por_periodo||[]).forEach(function(i){ ingByP[i.periodo]=i; });
+    // v2.14 — ingByP depende del tipo de ingreso seleccionado (ver buildVM).
+    var ingByP   = ingresosPorTipo(data, tipoSel);
 
     // Todos los períodos de ese año que existan en CUALQUIER fuente — mismo
     // criterio que _poblarSelectores() en el frontend (series_tiempo.periodos),
@@ -2275,13 +2368,19 @@ async function sendChat(){
     var meses = win.map(etiquetaMes);
     var cgo = win.map(function(p){ var r=byP[p]; return r2((r?r.costos_gastos:0)/M); });
     var nom = win.map(function(p){ var r=byP[p]; return r2((r?(r.mod+r.moi):0)/M); });
-    var ingresosSerie = win.map(function(p){ var r=byP[p]; return r2((r?r.ingresos:0)/M); });
-    var margenSerie = win.map(function(p){ var r=byP[p]; return r?r.margen_pct:null; });
+    var ingresosSerie = win.map(function(p){ return r2(((ingByP[p]&&ingByP[p].total)||0)/M); });
+    var margenSerie = win.map(function(p){
+      var r=byP[p]; if(!r) return null;
+      var ing=(ingByP[p]&&ingByP[p].total)||0;
+      var costoP=(r.mod||0)+(r.moi||0)+(r.costos_gastos||0);
+      return ing ? r2((ing-costoP)/ing*100) : null;
+    });
 
     var totMod=0,totMoi=0,totCg=0,totIng=0,totHorasDisp=0,totHorasJira=0,totColabMod=0,nColab=0,totTL=0,nTL=0;
     win.forEach(function(p){
       var r=byP[p]; if(!r) return;
-      totMod+=r.mod||0; totMoi+=r.moi||0; totCg+=r.costos_gastos||0; totIng+=r.ingresos||0;
+      totMod+=r.mod||0; totMoi+=r.moi||0; totCg+=r.costos_gastos||0;
+      totIng+=(ingByP[p]&&ingByP[p].total)||0;
       totHorasDisp+=r.horas_disponibles||0; totHorasJira+=r.horas_jira||0;
       if(r.colaboradores_mod){ totColabMod+=r.colaboradores_mod; nColab++; }
       if(r.tiempo_laboral){ totTL+=r.tiempo_laboral; nTL++; }
@@ -2373,26 +2472,79 @@ async function sendChat(){
       vh: vh, vhTrend: vhTrend,
       progs: progs, progMes: progMes,
       areasNomTot: areasNomTot, egrRubro: egrRubro, egrCat: egrCat, ingProg: ingProg,
-      kpis: kpis,
+      kpis: kpis, tipoIngreso: tipoSel,
       aniosDisponibles: aniosDe(resumen), mesesDe: mesesPorAnio(resumen.filter(function(r){return (r.mod||0)>0;})),
       modo: 'anual'
     };
   }
 
-  root.FinOpsAdapter = { buildVM: buildVM, buildVMAnual: buildVMAnual, etiquetaMes: etiquetaMes };
+  root.FinOpsAdapter = {
+    buildVM: buildVM, buildVMAnual: buildVMAnual, etiquetaMes: etiquetaMes,
+    ingresosPorTipo: ingresosPorTipo, resumenConTipo: resumenConTipo,
+    tiposDisponibles: tiposDisponibles, DEFAULT_TIPO_INGRESO: DEFAULT_TIPO_INGRESO
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.FinOpsAdapter;
 })(typeof window !== 'undefined' ? window : this);
 
 var TOT={mod:1141502485,modmoi:1808481651,cg:1027740227};
 var VM=null, DASH=null;
+
+// v2.14 (2026-09-21) — Filtro de tipo de ingreso (selector del header,
+// #selTipoIngreso). El ETL v2.13 expone 7 tipos (recaudado, facturado y
+// causado, cada uno ejecutado/presupuestado según el concepto) en
+// `ingresos_tipos_por_periodo`. Elegir uno recalcula ingresos/utilidad/
+// margen en TODO el dashboard (KPIs, tendencia, rentabilidad por programa
+// y por área) — nunca solo la tarjeta de ingresos. Ver decisiones-
+// arquitectura.md D-014.
+var TIPO_INGRESO_SEL = 'causado_ejecutado';
+// Mapa {periodo: {total, por_programa}} del tipo seleccionado — fuente
+// única para todo lo que antes leía `DASH.ingresos_por_periodo` a secas.
+function _ingresosTipoMap(){ return DASH ? FinOpsAdapter.ingresosPorTipo(DASH, TIPO_INGRESO_SEL) : {}; }
+// `resumen_por_periodo` con ingresos/utilidad/margen ya recalculados según
+// el tipo seleccionado — fuente única para todo lo que antes leía
+// `DASH.resumen_por_periodo` para esos 3 campos.
+function _resumenTipo(){ return DASH ? FinOpsAdapter.resumenConTipo(DASH, TIPO_INGRESO_SEL) : []; }
+function _tipoIngresoLabel(){
+  var tipos = DASH ? FinOpsAdapter.tiposDisponibles(DASH) : [];
+  var t = tipos.filter(function(x){ return x.key===TIPO_INGRESO_SEL; })[0];
+  return t ? t.label : TIPO_INGRESO_SEL;
+}
+function _poblarSelectorTipoIngreso(){
+  var sel = document.getElementById('selTipoIngreso'); if(!sel||!DASH) return;
+  var tipos = FinOpsAdapter.tiposDisponibles(DASH);
+  sel.innerHTML = tipos.map(function(t){
+    return '<option value="'+t.key+'"'+(t.key===TIPO_INGRESO_SEL?' selected':'')+'>'+t.label+'</option>';
+  }).join('');
+  sel.onchange = function(){ _cambiarTipoIngreso(sel.value); };
+}
+function _cambiarTipoIngreso(tipo){
+  if(!DASH || tipo===TIPO_INGRESO_SEL) return;
+  TIPO_INGRESO_SEL = tipo;
+  // Reconstruye la vista-modelo actual (mensual o consolidada) con el nuevo
+  // tipo de ingreso — mismo período/año que ya estaba seleccionado, solo
+  // cambia el tipo. _renderTodo() propaga el cambio a KPIs, tendencia,
+  // Programas y Áreas (todos leen de VM/_resumenTipo()/_ingMap()).
+  var anio = VM && VM.periodoSel ? String(VM.periodoSel).split('-')[0] : '';
+  var mes  = (VM && VM.modo!=='anual' && VM.periodoSel) ? String(VM.periodoSel).split('-')[1] : null;
+  if (HDR_MODO === 'anual'){
+    aplicarVM(FinOpsAdapter.buildVMAnual(DASH, anio, TIPO_INGRESO_SEL));
+  } else {
+    aplicarVM(FinOpsAdapter.buildVM(DASH, {periodo: mes ? (anio+'-'+mes) : undefined, tipoIngreso: TIPO_INGRESO_SEL}));
+  }
+  _renderTodo();
+}
 function _num(n){return '$'+Math.round(n||0).toLocaleString('es-CO');}
-function _buildCtx(vm){var k=vm.kpis;return 'Eres analista financiero de SuperLikers. Datos reales del '+(vm.modo==='anual'?'año':'mes')+' '+k.periodo+': '
+function _buildCtx(vm){var k=vm.kpis;return 'Eres analista financiero de SuperLikers. Datos reales del '+(vm.modo==='anual'?'año':'mes')+' '+k.periodo+' (ingreso tipo '+_tipoIngresoLabel()+'): '
   +'MOD '+_num(k.mod)+', MOI '+_num(k.moi)+', Costos y Gastos '+_num(k.costos_gastos)+', Ingresos '+_num(k.ingresos)
   +', Utilidad '+_num(k.utilidad)+', Margen '+k.margen_pct+'%. Valor hora: MOD '+_num(k.vh_mod)+', MOD+MOI '+_num(k.vh_mod_moi)
   +', Completo '+_num(k.vh_full)+'. Colaboradores MOD '+k.colaboradores_mod+', horas disponibles '+Math.round(k.horas_disponibles)
   +', horas Jira '+Math.round(k.horas_jira)+'. Responde en español, cita cifras reales, máximo 5 oraciones.';}
 
-function _resumenDe(p){ return (DASH&&DASH.resumen_por_periodo||[]).filter(function(x){return x.periodo===p;})[0]; }
+// v2.14 — lee de _resumenTipo() (ingresos/utilidad/margen ya recalculados
+// según TIPO_INGRESO_SEL); el resto de campos (mod, moi, costos_gastos,
+// horas...) llegan intactos, así que esto es seguro para todos los usos
+// existentes de _resumenDe(), no solo los que dependen de ingresos.
+function _resumenDe(p){ return (_resumenTipo()||[]).filter(function(x){return x.periodo===p;})[0]; }
 function _horasJiraDe(per){ if(!DASH) return 0; var s=0; (DASH.programas_detalle||[]).forEach(function(x){ if(x.p===per) s+=x.horas||0; }); if(s) return s; var r=_resumenDe(per); return r?(r.horas_jira||0):0; }
 function renderKPIs(){
   if(!VM) return;
@@ -2401,6 +2553,7 @@ function renderKPIs(){
   var util=k.horas_disponibles?(k.horas_jira/k.horas_disponibles*100):0;
   function set(id,v){var e=document.getElementById(id); if(e) e.textContent=v;}
   set('kIng',fmtM(k.ingresos)); set('kCostoT',fmtM(costoT)); set('kUtil',fmtM(k.utilidad));
+  set('kIngSub',_tipoIngresoLabel().toLowerCase()+' ('+(VM.modo==='anual'?'año':'mes')+')');
   set('kMargen',k.margen_pct==null?'-':k.margen_pct.toFixed(1)+'%');
   set('kUtilz',Math.round(util)+'%'); set('kUtilzSub',Math.round(k.horas_jira)+'h / '+Math.round(k.horas_disponibles)+'h');
   set('kNom',fmtM(k.mod+k.moi)); set('kCg',fmtM(k.costos_gastos));
@@ -2484,6 +2637,7 @@ function _poblarSelectores(){
   selM.innerHTML=mesesA.map(function(m){return '<option value="'+m+'"'+(m===pa[1]?' selected':'')+'>'+_MESNOM[parseInt(m,10)]+'</option>';}).join('');
   selA.onchange=function(){ _cambiarPeriodo(selA.value, null); };
   selM.onchange=function(){ _cambiarPeriodo(selA.value, selM.value); };
+  _poblarSelectorTipoIngreso();
 }
 function _poblarSelectoresEg(){
   // sincroniza el select interno de mes de Costos y Gastos con el header
@@ -2498,7 +2652,7 @@ function _cambiarPeriodo(anio, mes){
   // Mes queda deshabilitado en este modo (ver _pintarModoBtns) porque ya no
   // aplica: no hay "un mes" seleccionado, hay un año completo.
   if (HDR_MODO === 'anual'){
-    aplicarVM(FinOpsAdapter.buildVMAnual(DASH, anio));
+    aplicarVM(FinOpsAdapter.buildVMAnual(DASH, anio, TIPO_INGRESO_SEL));
     _poblarSelectores();
     _renderTodo();
     return;
@@ -2507,7 +2661,7 @@ function _cambiarPeriodo(anio, mes){
   var periodosAll=(DASH.series_tiempo&&DASH.series_tiempo.periodos)||(DASH.resumen_por_periodo||[]).map(function(r){return r.periodo;});
   var res=periodosAll.filter(function(p){return p&&p.split('-')[0]===anio;}).sort();
   if(!mes){ mes=res.length?res[res.length-1].split('-')[1]:'01'; }
-  aplicarVM(FinOpsAdapter.buildVM(DASH,{periodo:anio+'-'+mes}));
+  aplicarVM(FinOpsAdapter.buildVM(DASH,{periodo:anio+'-'+mes, tipoIngreso:TIPO_INGRESO_SEL}));
   _poblarSelectores();
   _renderTodo();
 }
@@ -2523,7 +2677,7 @@ window.addEventListener('DOMContentLoaded',function(){
   _cargarDatos().then(function(d){
     if(!d){ console.error('Sin datos'); _actualizarBadgeGenerado(null); return; }
     DASH=d;
-    aplicarVM(FinOpsAdapter.buildVM(DASH,{}));
+    aplicarVM(FinOpsAdapter.buildVM(DASH,{tipoIngreso:TIPO_INGRESO_SEL}));
     _poblarSelectores();
     _renderTodo();
     _actualizarBadgeGenerado(d);
