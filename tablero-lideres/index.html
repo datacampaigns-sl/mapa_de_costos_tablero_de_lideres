@@ -3036,7 +3036,15 @@ function _conRenderAsignadora(per){
   var cnv=document.getElementById('cConAsigProg');
   if(_cConAsigProg){ try{ _cConAsigProg.destroy(); }catch(e){} _cConAsigProg=null; }
   if(cnv && window.Chart){
-    _cConAsigProg=new Chart(cnv,{data:{
+    // v2.16 (ver D-022) — faltaba `type:'bar'` en la config de Chart.js. Sin
+    // un `type` (ni en la raíz ni por dataset), Chart.js v4 no sabe qué
+    // controlador usar y `new Chart(...)` lanza "\"undefined\" is not a
+    // registered controller" — una excepción SIN CAPTURAR que interrumpía
+    // el resto de la función: por eso también se quedaban vacíos el badge
+    // "N combinaciones programa+area" y la tabla Programa×Área×Componente
+    // de más abajo (nunca se llegaba a ejecutar ese código). Confirmado
+    // reproduciendo el error exacto con Chart.js real + node-canvas.
+    _cConAsigProg=new Chart(cnv,{type:'bar',data:{
       labels:progsOrd.map(function(p){return p.k.length>22?p.k.slice(0,20)+'...':p.k;}),
       datasets:[
         {label:'Facturable',data:progsOrd.map(function(p){return Math.round(p.f);}),backgroundColor:'#1D9E75',borderRadius:4,stack:'h'},
