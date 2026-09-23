@@ -2786,6 +2786,25 @@ function _conResolverArea(per){
     });
     var topLider=Object.keys(horasPorAreaL).sort(function(a,b){return horasPorAreaL[b]-horasPorAreaL[a];})[0];
     if(topLider) return topLider;
+    // v2.15 (ver D-021) — el líder existe pero no tiene NINGUNA fila de Jira
+    // en el mes elegido (`per`). Antes esto caía directo al bloque de abajo
+    // ("área con más horas de toda la compañía"), perdiendo por completo la
+    // identidad del líder seleccionado: Capacidad mostraba el equipo de otra
+    // área, y como el área resuelta dejaba de ser Engagement/Ecosistemas,
+    // `_conEsAsignadora` daba falso y el bloque "qué gastaron las otras
+    // áreas" nunca se pintaba. Le pasaba sobre todo a líderes "asignadoras"
+    // (Engagement/Ecosistemas), que ejecutan poco o nada en Jira y pueden
+    // tener meses completos sin ninguna fila propia. El área de un líder es
+    // un dato organizacional estable (no depende del mes), así que se busca
+    // en CUALQUIER período donde sí tenga registros antes de rendirse.
+    var horasPorAreaLTodos={};
+    (DASH.personas_por_periodo||[]).forEach(function(p){
+      if(p.lider===conSelLider && p.area){
+        horasPorAreaLTodos[p.area] = (horasPorAreaLTodos[p.area]||0) + (p.hF||0) + (p.hNF||0);
+      }
+    });
+    var topLiderTodos=Object.keys(horasPorAreaLTodos).sort(function(a,b){return horasPorAreaLTodos[b]-horasPorAreaLTodos[a];})[0];
+    if(topLiderTodos) return topLiderTodos;
   }
   var ha={};
   (DASH.programas_detalle||[]).forEach(function(x){ if(x.p===per && x.area && x.area!=='SIN ÁREA') ha[x.area]=(ha[x.area]||0)+(x.horas||0); });
