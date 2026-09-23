@@ -341,12 +341,12 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
                   más horas de cada programa que ellas asignaron. -->
         <div class="card" id="conAsigCard" style="margin-bottom:14px;border-left:3px solid #1D9E75;display:none">
           <div class="ctitle">Consumo de horas por programa (toda la compañia) <span class="tag tp" id="conAsigTag">-</span></div>
-          <div class="csub">Facturable vs No Facturable por programa, todas las areas del mes seleccionado — vista para lideres que asignan Jiras a otras areas</div>
+          <div class="csub" id="conAsigSub">Facturable vs No Facturable por programa, todas las areas del mes seleccionado — vista para lideres que asignan Jiras a otras areas</div>
           <div style="height:280px;margin-top:8px"><canvas id="cConAsigProg"></canvas></div>
         </div>
         <div class="card" id="conAsigDescCard" style="margin-bottom:14px;border-left:3px solid #1D9E75;display:none">
           <div class="ctitle">Desglose Programa x Area x Componente <span class="tag tp" id="conAsigDescTag">-</span></div>
-          <div class="csub">Que area consumio mas horas de cada programa este mes · ordenado por horas desc</div>
+          <div class="csub" id="conAsigDescSub">Que area consumio mas horas de cada programa este mes · ordenado por horas desc</div>
           <div id="conAsigDescBody" style="margin-top:8px;overflow-x:auto"></div>
         </div>
 
@@ -2964,7 +2964,7 @@ function renderConsolidada(){
   // BLOQUE AJUSTES DETALLADO — no aplica a áreas asignadoras (ver
   // _conEsAsignadora); en su lugar se pinta el bloque de consumo por
   // programa a nivel de toda la compañía.
-  if (esAsignadora) { _conRenderAsignadora(per); }
+  if (esAsignadora) { _conRenderAsignadora(per, area); }
   else { _conRenderAjustes(rows, area, per, hAju, hTot); }
 
   // BLOQUE 🅒 / 🅓 — En qué se fue el tiempo · Horas No Facturables
@@ -3006,22 +3006,55 @@ function renderConsolidada(){
 }
 
 var _cConAsigProg=null;
+// v2.16 (ver D-023) — alcance de programas por área asignadora, a pedido del
+// usuario: Ecosistemas por ahora solo debe mirar SuperLikers/SuperMeseros/
+// SuperVendedores (lista blanca); Engagement mira TODO menos SuperMeseros/
+// SuperVendedores (lista negra — incluye SuperLikers y cualquier otro
+// programa, incluido 'SIN PROGRAMA', simplemente no esos 2). Comparación
+// sin tildes/mayúsculas vía _conNorm, igual que _conEsAsignadora.
+var _PROGS_ECOSISTEMAS = ['SUPERLIKERS','SUPERMESEROS','SUPERVENDEDORES'];
+var _PROGS_EXCLUIDOS_ENGAGEMENT = ['SUPERMESEROS','SUPERVENDEDORES'];
+function _conFiltroProgramasAsignadora(area, rows){
+  var an = _conNorm(area);
+  if (an === 'ECOSISTEMAS') {
+    return rows.filter(function(x){ return _PROGS_ECOSISTEMAS.indexOf(_conNorm(x.prog||'')) >= 0; });
+  }
+  if (an === 'ENGAGEMENT') {
+    return rows.filter(function(x){ return _PROGS_EXCLUIDOS_ENGAGEMENT.indexOf(_conNorm(x.prog||'')) < 0; });
+  }
+  return rows;
+}
 /**
  * Bloque para áreas asignadoras (Engagement, Ecosistemas — ver
  * _conEsAsignadora). Estas áreas no ejecutan la tarea en Jira, la asignan a
  * otras áreas, así que lo que les sirve como líderes no es "su" ejecución
- * (casi no tienen) sino la de TODOS los programas de la compañía ese mes:
+ * (casi no tienen) sino la de TODOS los programas de la compañía ese mes,
+ * acotado al alcance de programas que le corresponde a cada una (ver
+ * _conFiltroProgramasAsignadora / D-023):
  *   1) Consumo de horas Facturables/No Facturables por programa (gráfica).
  *   2) Desglose Programa x Área x Componente: qué área se llevó más horas
  *      de cada programa (tabla) — les dice, del trabajo que ellas asignan,
  *      quién terminó ejecutándolo y cuánto.
  * Fuente: programas_detalle del período, SIN filtrar por área — a
- * propósito, es la única forma de ver "toda la compañía".
+ * propósito, es la única forma de ver "toda la compañía" (sí se filtra por
+ * programa, ver arriba).
  */
-function _conRenderAsignadora(per){
+function _conRenderAsignadora(per, area){
   var rowsTodas=(DASH.programas_detalle||[]).filter(function(x){return x.p===per;});
+  rowsTodas = _conFiltroProgramasAsignadora(area, rowsTodas);
   var tagEl=document.getElementById('conAsigTag');
   if(tagEl) tagEl.textContent = per+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas';
+  var _an=_conNorm(area);
+  var _subTxt = _an==='ECOSISTEMAS'
+    ? 'Facturable vs No Facturable por programa — solo SuperLikers, SuperMeseros y SuperVendedores (alcance actual de Ecosistemas)'
+    : _an==='ENGAGEMENT'
+      ? 'Facturable vs No Facturable por programa — todos menos SuperMeseros y SuperVendedores (alcance actual de Engagement)'
+      : 'Facturable vs No Facturable por programa, todas las areas del mes seleccionado — vista para lideres que asignan Jiras a otras areas';
+  var subEl=document.getElementById('conAsigSub'); if(subEl) subEl.textContent=_subTxt;
+  var subElD=document.getElementById('conAsigDescSub');
+  if(subElD) subElD.textContent = (_an==='ECOSISTEMAS'||_an==='ENGAGEMENT')
+    ? 'Que area consumio mas horas de cada programa este mes (dentro del alcance de arriba) · ordenado por horas desc'
+    : 'Que area consumio mas horas de cada programa este mes · ordenado por horas desc';
 
   // 1) F/NF por programa
   var porProg={};
