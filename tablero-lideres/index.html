@@ -374,6 +374,15 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
           </div>
         </div>
 
+        <!-- BLOQUE ERRORES POR AREA (ajustes/correcciones/retrabajos, compañía
+             completa agrupada por área) — v2.21 (ver D-028). Visible para
+             áreas "asignadoras" (Engagement, Ecosistemas, Gerencia General). -->
+        <div class="card" id="conAjuAreaCard" style="margin-bottom:14px;border-left:3px solid #A32D2D;display:none">
+          <div class="ctitle">Errores por area (ajustes / correcciones / retrabajos) <span class="tag tr" id="conAjuAreaTag">-</span></div>
+          <div class="csub">Horas con componente que contiene "ajuste", "correc" o "retrab", agrupadas por area — toda la compañia, sin restriccion de programa</div>
+          <div id="conAjuAreaBody" style="margin-top:8px"></div>
+        </div>
+
         <!-- BLOQUE 🅔 COMPROMISO VS EJECUTADO DEL ÁREA -->
         <div class="card" style="margin-bottom:14px;border-left:3px solid #185FA5">
           <div class="ctitle">Compromiso vs Ejecutado <span class="tag tw" id="conCompTag">-</span></div>
@@ -2709,8 +2718,23 @@ function cfBarras(blockId, dim, arr, colorSel, colorBase, topN){
  * acento distinto en la fuente.
  */
 var _AREAS_ASIGNADORAS = ['ENGAGEMENT','ECOSISTEMAS'];
+// v2.21 (ver D-028) — vista personalizada para Tatiana Estupiñán (Gerencia
+// General): a diferencia de un líder normal, ella no está atada a un área de
+// Jira — necesita ver la compañía COMPLETA consolidada. En vez de intentar
+// resolverla como un líder real de `personas_por_periodo` (no tiene horas
+// propias en Jira, así que no resolvería a nada), se le trata como un chip
+// de líder "especial" que resuelve siempre a la seudo-área `_AREA_TODAS`.
+// `_conAreaMatch` es el único punto de comparación de área usado en este
+// módulo desde este fix: con área normal se comporta igual que `===`
+// (cero cambio de comportamiento para los demás líderes), y con
+// `_AREA_TODAS` no filtra nada (todas las áreas cuentan).
+var _LIDER_GG = 'Tatiana Estupiñán';
+var _AREA_TODAS = '__TODAS__';
+function _conAreaMatch(xArea, area){
+  return area === _AREA_TODAS ? true : xArea === area;
+}
 function _conEsAsignadora(area){
-  return _AREAS_ASIGNADORAS.indexOf(_conNorm(area)) >= 0;
+  return area === _AREA_TODAS || _AREAS_ASIGNADORAS.indexOf(_conNorm(area)) >= 0;
 }
 
 function _conAjusteRe(s){
@@ -2780,11 +2804,15 @@ function _conPoblarSelectores(){
   selM.style.opacity = esAnual ? '0.5' : '1';
 }
 
-/** Lideres distintos vistos en cualquier período de personas_por_periodo. */
+/** Lideres distintos vistos en cualquier período de personas_por_periodo,
+ * más el chip especial de Gerencia General (_LIDER_GG) al final, que no
+ * sale de los datos — ver _conResolverArea. */
 function _conLideresDisp(){
   var s={};
   (DASH.personas_por_periodo||[]).forEach(function(p){ if(p.lider) s[p.lider]=true; });
-  return Object.keys(s).sort();
+  var arr=Object.keys(s).sort();
+  arr.push(_LIDER_GG);
+  return arr;
 }
 function _conRenderLiderChips(){
   var c=document.getElementById('conLiderChips'); if(!c) return;
@@ -2815,6 +2843,10 @@ function _conLiderToggle(nombre){
  *      default histórico de cuando existía el selector de Área).
  */
 function _conResolverArea(per){
+  // Gerencia General (chip especial, ver _LIDER_GG): siempre compañía
+  // completa, sin importar Rol/Persona residuales (ya se limpian al
+  // cambiar de líder en _conLiderToggle).
+  if(conSelLider === _LIDER_GG) return _AREA_TODAS;
   if(conSelPersona){
     var found=(DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && p.persona===conSelPersona;})[0];
     if(found && found.area) return found.area;
@@ -2874,7 +2906,11 @@ function _conPoblarFiltrosPersona(per){
   var selR=document.getElementById('conRol'), selP=document.getElementById('conPersonaSel');
   if(!selR||!selP) return;
   var key = conSelLider+'|'+per+'|'+(_conVentanaActual?'anual':'mensual');
-  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && (!conSelLider || p.lider===conSelLider);});
+  // v2.21 (ver D-028): con Gerencia General (_LIDER_GG) el líder no es un
+  // valor real en `lider` de personas_por_periodo (no ejecuta Jira), así que
+  // filtrar por `p.lider===conSelLider` dejaría estos selects siempre vacíos.
+  // Para ella, Rol/Persona se llenan con TODA la compañía (sin filtro de líder).
+  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && (!conSelLider || conSelLider===_LIDER_GG || p.lider===conSelLider);});
 
   if(key !== _conFiltrosKey){
     _conFiltrosKey = key;
@@ -2912,8 +2948,8 @@ function _conFiltroChange(){
 function _conPersonasPermitidas(area, per){
   var set={};
   (DASH.personas_por_periodo||[]).filter(function(p){
-    return p.area===area && _conMatch(p.p,per)
-      && (!conSelLider || p.lider===conSelLider)
+    return _conAreaMatch(p.area,area) && _conMatch(p.p,per)
+      && (!conSelLider || conSelLider===_LIDER_GG || p.lider===conSelLider)
       && (!conSelRol || p.rol===conSelRol)
       && (!conSelPersona || p.persona===conSelPersona);
   }).forEach(function(p){ if(p.persona) set[p.persona]=true; });
@@ -2931,20 +2967,32 @@ function renderConsolidada(){
   _conSetVentana(per);
   var area=_conResolverArea(per);
   if(!area) return;
-  var filtroPersonaActivo = !!(conSelLider || conSelRol || conSelPersona);
+  // v2.21 (ver D-028): el chip de Gerencia General NO cuenta como "filtro de
+  // persona activo" — su selección ES el criterio de área (compañía
+  // completa), no una restricción sobre ella. Si además se llega a elegir
+  // Rol/Persona con ella activa, esos sí siguen contando como filtro (pero
+  // ver limitación en _conPoblarFiltrosPersona: hoy esos selects se llenan
+  // a partir de `lider===conSelLider`, y nadie tiene ese líder literal en
+  // Jira, así que quedarán vacíos — queda como mejora futura).
+  var esGG = (conSelLider === _LIDER_GG);
+  var filtroPersonaActivo = !!((conSelLider && !esGG) || conSelRol || conSelPersona);
   var personasPermitidas = filtroPersonaActivo ? _conPersonasPermitidas(area, per) : null;
-  document.getElementById('conTitle').textContent = area;
-  document.getElementById('conSubtitle').textContent = 'Vista consolidada de ' + area + ' — ' + _conVentanaLabel(per);
+  document.getElementById('conTitle').textContent = esGG ? 'Gerencia General' : area;
+  document.getElementById('conSubtitle').textContent = esGG
+    ? 'Compañia completa — todas las areas, todos los programas — ' + _conVentanaLabel(per)
+    : 'Vista consolidada de ' + area + ' — ' + _conVentanaLabel(per);
   var esAsignadora = _conEsAsignadora(area);
   var elAju=document.getElementById('conAjuCard'), elAsig=document.getElementById('conAsigCard'), elAsigD=document.getElementById('conAsigDescCard');
+  var elAjuArea=document.getElementById('conAjuAreaCard');
   if(elAju) elAju.style.display = esAsignadora ? 'none' : '';
   if(elAsig) elAsig.style.display = esAsignadora ? '' : 'none';
   if(elAsigD) elAsigD.style.display = esAsignadora ? '' : 'none';
+  if(elAjuArea) elAjuArea.style.display = esAsignadora ? '' : 'none';
 
   // Data del período activo del área (un solo mes, o todo el año hasta la
   // fecha en modo Consolidado — ver _conMatch). Horas/ajustes/programas se
   // SUMAN naturalmente al ampliar la ventana, sin cambiar esta lógica.
-  var rows=(DASH.programas_detalle||[]).filter(function(x){return x.area===area && _conMatch(x.p,per);});
+  var rows=(DASH.programas_detalle||[]).filter(function(x){return _conAreaMatch(x.area,area) && _conMatch(x.p,per);});
   // v2.18 (ver D-025) — programas_detalle no trae persona propia, así que el
   // filtro de Líder/Rol/Persona se aplica indirectamente: si algún filtro de
   // persona está activo, los 6 KPIs (bloque A) deben salir de personas_detalle
@@ -2955,7 +3003,7 @@ function renderConsolidada(){
   var rowsKPI = rows;
   if (filtroPersonaActivo) {
     rowsKPI = (DASH.personas_detalle||[]).filter(function(x){
-      return x.area===area && _conMatch(x.p,per) && personasPermitidas[x.persona];
+      return _conAreaMatch(x.area,area) && _conMatch(x.p,per) && personasPermitidas[x.persona];
     });
   }
   var hF=0,hNF=0,hTot=0,hAju=0,ajustesSet={};
@@ -2992,8 +3040,8 @@ function renderConsolidada(){
     var tlM = (function(){ var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===p;})[0]; return r?(r.tiempo_laboral||0):0; })();
     var setM = {};
     (DASH.personas_por_periodo||[]).forEach(function(pp){
-      if(pp.area===area && pp.p===p && pp.persona
-        && (!conSelLider || pp.lider===conSelLider)
+      if(_conAreaMatch(pp.area,area) && pp.p===p && pp.persona
+        && (!conSelLider || esGG || pp.lider===conSelLider)
         && (!conSelRol || pp.rol===conSelRol)
         && (!conSelPersona || pp.persona===conSelPersona)) setM[pp.persona]=true;
     });
@@ -3003,9 +3051,18 @@ function renderConsolidada(){
     // por líder/rol/persona — no se puede filtrar. Con un filtro de persona
     // activo, este respaldo dejaría de tener sentido (mostraría el área
     // entera, ignorando el filtro), así que solo se usa sin filtro activo.
+    // v2.21 (ver D-028): para Gerencia General (área=_AREA_TODAS) el respaldo
+    // suma los activos de TODAS las áreas, no busca una fila con esa área
+    // literal (no existe).
     if(!colabM && !filtroPersonaActivo){
-      var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0];
-      colabM = actM ? (actM.activos||0) : 0;
+      var colabM_fallback;
+      if(area===_AREA_TODAS){
+        colabM_fallback = (DASH.usuarios_activos_por_area||[]).reduce(function(s,x){return s+(x.activos||0);},0);
+      } else {
+        var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0];
+        colabM_fallback = actM ? (actM.activos||0) : 0;
+      }
+      colabM = colabM_fallback;
       huboFallback = true;
     }
     colabPorMes.push(colabM); tlPorMes.push(tlM);
@@ -3054,15 +3111,17 @@ function renderConsolidada(){
 
   // BLOQUE AJUSTES DETALLADO — no aplica a áreas asignadoras (ver
   // _conEsAsignadora); en su lugar se pinta el bloque de consumo por
-  // programa a nivel de toda la compañía.
-  if (esAsignadora) { _conRenderAsignadora(per, area); }
+  // programa a nivel de toda la compañía + errores/ajustes por área
+  // (_conRenderAjustesPorArea, ver D-028 — pedido explícito de Tatiana
+  // Estupiñán/Gerencia General, pero se activa para cualquier asignadora).
+  if (esAsignadora) { _conRenderAsignadora(per, area); _conRenderAjustesPorArea(per); }
   else { _conRenderAjustes(rowsKPI, area, per, hAju, hTot); }
 
   // BLOQUE 🅒 / 🅓 — En qué se fue el tiempo · Horas No Facturables
   // Fuente preferida: personas_detalle (tiene persona+programa+componente).
   // Si el mes está fuera de la ventana del ETL (o no se ha corrido main() con
   // la versión que la genera), se cae a `rows` (programas_detalle) sin persona.
-  var rowsPD = (DASH.personas_detalle||[]).filter(function(x){return x.area===area && _conMatch(x.p,per);});
+  var rowsPD = (DASH.personas_detalle||[]).filter(function(x){return _conAreaMatch(x.area,area) && _conMatch(x.p,per);});
   // Filtro Rol/Lider/Persona: personas_detalle no trae esos campos propios,
   // así que se filtra por nombre usando el set resuelto desde personas_por_periodo.
   if(personasPermitidas) rowsPD = rowsPD.filter(function(x){return personasPermitidas[x.persona];});
@@ -3136,14 +3195,18 @@ function _conRenderAsignadora(per, area){
   var tagEl=document.getElementById('conAsigTag');
   if(tagEl) tagEl.textContent = _conVentanaLabel(per)+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas';
   var _an=_conNorm(area);
-  var _subTxt = _an==='ECOSISTEMAS'
+  var _subTxt = area===_AREA_TODAS
+    ? 'Facturable vs No Facturable por programa — TODOS los programas de la compañia (vista de Gerencia General, sin restriccion)'
+    : _an==='ECOSISTEMAS'
     ? 'Facturable vs No Facturable por programa — solo SuperLikers, SuperMeseros y SuperVendedores (alcance actual de Ecosistemas)'
     : _an==='ENGAGEMENT'
       ? 'Facturable vs No Facturable por programa — todos menos SuperMeseros y SuperVendedores (alcance actual de Engagement)'
       : 'Facturable vs No Facturable por programa, todas las areas del mes seleccionado — vista para lideres que asignan Jiras a otras areas';
   var subEl=document.getElementById('conAsigSub'); if(subEl) subEl.textContent=_subTxt;
   var subElD=document.getElementById('conAsigDescSub');
-  if(subElD) subElD.textContent = (_an==='ECOSISTEMAS'||_an==='ENGAGEMENT')
+  if(subElD) subElD.textContent = area===_AREA_TODAS
+    ? 'Que area ejecuto mas horas de cada programa este mes, entre TODAS las areas de la compañia · ordenado por horas desc'
+    : (_an==='ECOSISTEMAS'||_an==='ENGAGEMENT')
     ? 'Que area consumio mas horas de cada programa este mes (dentro del alcance de arriba) · ordenado por horas desc'
     : 'Que area consumio mas horas de cada programa este mes · ordenado por horas desc';
 
@@ -3225,6 +3288,49 @@ function _conRenderAsignadora(per, area){
   }
 }
 
+/**
+ * BLOQUE "Errores por área" — v2.21 (ver D-028), pedido explícito de Tatiana
+ * Estupiñán (Gerencia General): ella quiere ver, de un vistazo, qué área
+ * concentra más horas de "ajuste/corrección/retrabajo" — a diferencia del
+ * bloque de Ajustes normal (que es propio de una sola área), este agrega
+ * TODA la compañía y agrupa por área, sin restricción de programa (a
+ * propósito: un error es un error sin importar el alcance de programas que
+ * tenga asignado el líder que lo está mirando). Se activa para cualquier
+ * área "asignadora" (ver _conEsAsignadora), no solo para Gerencia General.
+ */
+function _conRenderAjustesPorArea(per){
+  var d=document.getElementById('conAjuAreaBody'), tag=document.getElementById('conAjuAreaTag');
+  if(!d) return;
+  var rows=(DASH.programas_detalle||[]).filter(function(x){ return _conMatch(x.p,per) && _conAjusteRe(x.comp); });
+  if(!rows.length){
+    if(tag) tag.textContent='0h';
+    d.innerHTML='<div style="padding:12px;background:#E7F5EE;border-radius:8px;font-size:12px;color:#1D6E52"><strong>Sin ajustes/errores reportados en '+_conVentanaLabel(per)+' (ninguna área).</strong></div>';
+    return;
+  }
+  var byArea={};
+  rows.forEach(function(x){
+    var a=x.area||'SIN ÁREA';
+    if(!byArea[a]) byArea[a]={h:0,comps:{}};
+    byArea[a].h += x.horas||0;
+    var kc=x.comp||'(sin componente)';
+    byArea[a].comps[kc]=(byArea[a].comps[kc]||0)+(x.horas||0);
+  });
+  var tot=rows.reduce(function(s,x){return s+(x.horas||0);},0);
+  var arr=Object.keys(byArea).map(function(a){
+    var comps=byArea[a].comps;
+    var top=Object.keys(comps).sort(function(x,y){return comps[y]-comps[x];})[0] || '-';
+    return {area:a, h:byArea[a].h, top:top, topH:comps[top]||0};
+  }).sort(function(a,b){return b.h-a.h;});
+  if(tag) tag.textContent = Math.round(tot).toLocaleString('es-CO')+'h · '+arr.length+' area(s) con ajustes';
+  var mx=arr[0].h||1;
+  d.innerHTML = arr.map(function(r){
+    var pct=tot?Math.round(r.h/tot*100):0;
+    var w=Math.round(r.h/mx*100);
+    return '<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:12px"><span>'+r.area+'</span><span style="font-weight:600;color:#A32D2D">'+Math.round(r.h).toLocaleString('es-CO')+'h · '+pct+'%</span></div>'
+      +'<div style="height:9px;background:var(--bg);border-radius:5px;overflow:hidden;margin-top:2px"><div style="height:100%;width:'+w+'%;background:#A32D2D;border-radius:5px"></div></div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-top:1px">componente top: '+r.top+' ('+Math.round(r.topH).toLocaleString('es-CO')+'h)</div></div>';
+  }).join('');
+}
 function _conRenderAjustes(rows, area, per, hAju, hTot){
   var d=document.getElementById('conAjuBody'); if(!d) return;
   var tag=document.getElementById('conAjuTag');
@@ -3293,7 +3399,7 @@ function _conRenderAjustes(rows, area, per, hAju, hTot){
 function _conRenderTrend(area){
   var cnv=document.getElementById('cConTrend'); if(!cnv) return;
   var meses={};
-  (DASH.programas_detalle||[]).forEach(function(x){ if(x.area===area) meses[x.p]=true; });
+  (DASH.programas_detalle||[]).forEach(function(x){ if(_conAreaMatch(x.area,area)) meses[x.p]=true; });
   var ms=Object.keys(meses).sort().slice(-12);
   var labels=[], ejec=[], pres=[], util=[];
   // v2.9 (2026-09-18) — mismo fix que el KPI de Capacidad de renderConsolidada:
@@ -3306,13 +3412,16 @@ function _conRenderTrend(area){
   // área+mes × tiempo laboral del mes; si Jira no tiene NINGÚN registro para
   // esa área+mes, se cae a `usuarios_activos_por_area` (respaldo sin período).
   ms.forEach(function(p){
-    var tot=(DASH.programas_detalle||[]).filter(function(x){return x.area===area&&x.p===p;})
+    var tot=(DASH.programas_detalle||[]).filter(function(x){return _conAreaMatch(x.area,area)&&x.p===p;})
       .reduce(function(s,x){return s+(x.horas||0);},0);
     var tl=(function(){ var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===p;})[0]; return r?(r.tiempo_laboral||0):0; })();
     var colabJiraM={};
-    (DASH.personas_por_periodo||[]).forEach(function(pp){ if(pp.area===area && pp.p===p && pp.persona) colabJiraM[pp.persona]=true; });
+    (DASH.personas_por_periodo||[]).forEach(function(pp){ if(_conAreaMatch(pp.area,area) && pp.p===p && pp.persona) colabJiraM[pp.persona]=true; });
     var colabM=Object.keys(colabJiraM).length;
-    if(!colabM){ var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0]; colabM=actM?(actM.activos||0):0; }
+    if(!colabM){
+      if(area===_AREA_TODAS){ colabM=(DASH.usuarios_activos_por_area||[]).reduce(function(s,x){return s+(x.activos||0);},0); }
+      else { var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0]; colabM=actM?(actM.activos||0):0; }
+    }
     var pr=colabM*tl;
     var mm=parseInt(p.split('-')[1],10);
     labels.push((_MESNOM[mm]||p.split('-')[1]).slice(0,3)+' '+p.split('-')[0].slice(-2));
@@ -3408,7 +3517,10 @@ function _conRenderCompromiso(area, per){
   }
 
   // Match flexible de nombres de área entre Matriz y JSON (ej: "Analista de Engagement" vs "Analista Engagement")
+  // v2.21 (ver D-028): con área=_AREA_TODAS (Gerencia General) siempre hace
+  // match — el compromiso vs ejecutado se agrega a nivel de TODA la compañía.
   function _matchArea(a,b){
+    if(b===_AREA_TODAS) return true;
     var A=_conNorm(a), B=_conNorm(b);
     if(A===B) return true;
     if(A.indexOf(B)>=0 || B.indexOf(A)>=0) return true;
@@ -3430,7 +3542,7 @@ function _conRenderCompromiso(area, per){
   // la ventana de meses con datos reales del año (ver comentario arriba).
   var ejec={};  // prog_normalizado -> {hF, hNF, hAju, tot, mesesConDatos}
   (DASH.programas_detalle||[]).forEach(function(x){
-    if(x.area!==area) return;
+    if(!_conAreaMatch(x.area,area)) return;
     if(!_conMatch(x.p,per)) return;
     var k=_conNorm(x.prog);
     if(!ejec[k]) ejec[k]={prog:x.prog,hF:0,hNF:0,hAju:0,tot:0,meses:{}};
@@ -3554,7 +3666,7 @@ function _conCompDetalle(x, area, per){
   // meses con datos reales del año — nunca ene-hasta-mes fijo).
   var progName = x.prog;
   var rows=(DASH.programas_detalle||[]).filter(function(y){
-    return y.area===area && _conNorm(y.prog)===_conNorm(progName) && _conMatch(y.p,per);
+    return _conAreaMatch(y.area,area) && _conNorm(y.prog)===_conNorm(progName) && _conMatch(y.p,per);
   });
 
   // Componentes
@@ -3574,7 +3686,7 @@ function _conCompDetalle(x, area, per){
   var personasSet=[];
   var conPersonaProg = false;
   (DASH.personas_detalle||[]).forEach(function(p){
-    if(p.area===area && _conNorm(p.prog||'')===_conNorm(progName) && _conMatch(p.p,per) && p.persona){
+    if(_conAreaMatch(p.area,area) && _conNorm(p.prog||'')===_conNorm(progName) && _conMatch(p.p,per) && p.persona){
       conPersonaProg = true;
       var ya=personasSet.filter(function(z){return z.persona===p.persona;})[0];
       var esNF = p.fact==='NF';
