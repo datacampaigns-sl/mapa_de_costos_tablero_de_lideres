@@ -400,9 +400,33 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
           <div class="kc"><div class="klbl">Promedio por ticket</div><div class="kval" id="capKAvgTicket">-</div><div class="kdelta nu" id="capKAvgTicketSub">-</div><div class="kico gr"><i class="ti ti-ticket"></i></div></div>
         </div>
 
+        <!-- Filtros (reales: se calculan de los datos, y SI filtran los KPIs de
+             arriba y cada panel de abajo — ver _capFiltros/_capRowsProg/
+             _capRowsPersona). v2.20 (ver D-027): se movieron aqui, justo debajo
+             de los KPIs, porque antes quedaban despues de 2 tarjetas grandes y
+             el usuario no los veia sin hacer scroll (parecia que no existia el
+             filtro de area). "Sigue selector superior" (por defecto) hace que
+             esta pestaña obedezca el Año/Mes y el Mensual/Consolidado del
+             header, igual que Vista Consolidada — puedes elegir un mes puntual
+             o "Todos los meses" para anularlo manualmente. -->
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+          <select id="capSelMes" onchange="renderCap()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt)">
+            <option value="header">Sigue selector superior</option>
+            <option value="all">Todos los meses</option>
+          </select>
+          <select id="capSelProg" onchange="renderCap()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt)">
+            <option value="all">Todos los programas</option>
+          </select>
+          <select id="capSelArea" onchange="renderCap()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt)">
+            <option value="all">Todas las areas</option>
+          </select>
+          <span id="capTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+        </div>
+        <div id="capCrossChip" style="margin-bottom:12px"></div>
+
         <!-- Utilizacion por area (real) -->
         <div class="card" style="margin-bottom:16px;border-left:3px solid #BA7517">
-          <div class="ctitle">Utilizacion por area <span class="tag tw">horas Jira / (colaboradores x tiempo laboral)</span></div>
+          <div class="ctitle">Utilizacion por area <span class="tag tw">horas Jira / (colaboradores x tiempo laboral)</span> <span class="tag ti" id="capUtilAreaTag" style="font-size:9px"></span></div>
           <div class="csub">Quien esta sobrecargado (&gt;100%) y quien tiene capacidad ociosa. El promedio global esconde esta dispersion.</div>
           <div id="capUtilAreaMsg"></div>
           <div id="capUtilArea" style="margin-top:8px"></div>
@@ -423,21 +447,6 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
             </ol>
           </div>
         </div>
-
-        <!-- Filtros (reales: se calculan de los datos, y SI filtran cada panel de abajo) -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <select id="capSelMes" onchange="renderCap()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt)">
-            <option value="all">Todos los meses</option>
-          </select>
-          <select id="capSelProg" onchange="renderCap()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt)">
-            <option value="all">Todos los programas</option>
-          </select>
-          <select id="capSelArea" onchange="renderCap()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt)">
-            <option value="all">Todas las areas</option>
-          </select>
-          <span id="capTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
-        </div>
-        <div id="capCrossChip" style="margin-bottom:12px"></div>
 
         <!-- Fila 1: utilizacion mensual + por programa (cruce de filtros: programa | componente | persona) -->
         <div class="g2b" style="margin-bottom:14px">
@@ -2936,9 +2945,22 @@ function renderConsolidada(){
   // fecha en modo Consolidado — ver _conMatch). Horas/ajustes/programas se
   // SUMAN naturalmente al ampliar la ventana, sin cambiar esta lógica.
   var rows=(DASH.programas_detalle||[]).filter(function(x){return x.area===area && _conMatch(x.p,per);});
+  // v2.18 (ver D-025) — programas_detalle no trae persona propia, así que el
+  // filtro de Líder/Rol/Persona se aplica indirectamente: si algún filtro de
+  // persona está activo, los 6 KPIs (bloque A) deben salir de personas_detalle
+  // (que sí trae `persona`) restringido a las personas permitidas por el
+  // filtro, en vez de `rows` (que ignoraría el filtro por completo). Sin
+  // filtro activo, `rowsKPI` es exactamente `rows` — cero cambio de
+  // comportamiento respecto a antes de este fix.
+  var rowsKPI = rows;
+  if (filtroPersonaActivo) {
+    rowsKPI = (DASH.personas_detalle||[]).filter(function(x){
+      return x.area===area && _conMatch(x.p,per) && personasPermitidas[x.persona];
+    });
+  }
   var hF=0,hNF=0,hTot=0,hAju=0,ajustesSet={};
   var progsSet={};
-  rows.forEach(function(x){
+  rowsKPI.forEach(function(x){
     hTot+=x.horas||0;
     if(x.fact==='NF') hNF+=x.horas||0; else hF+=x.horas||0;
     if(_conAjusteRe(x.comp)){ hAju+=x.horas||0; ajustesSet[x.comp]=true; }
@@ -2969,9 +2991,19 @@ function renderConsolidada(){
   periodosVentana.forEach(function(p){
     var tlM = (function(){ var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===p;})[0]; return r?(r.tiempo_laboral||0):0; })();
     var setM = {};
-    (DASH.personas_por_periodo||[]).forEach(function(pp){ if(pp.area===area && pp.p===p && pp.persona) setM[pp.persona]=true; });
+    (DASH.personas_por_periodo||[]).forEach(function(pp){
+      if(pp.area===area && pp.p===p && pp.persona
+        && (!conSelLider || pp.lider===conSelLider)
+        && (!conSelRol || pp.rol===conSelRol)
+        && (!conSelPersona || pp.persona===conSelPersona)) setM[pp.persona]=true;
+    });
     var colabM = Object.keys(setM).length;
-    if(!colabM){
+    // v2.18 (ver D-025): el respaldo de "usuarios activos" es un conteo
+    // agregado del área completa (usuarios_activos_por_area), sin desglose
+    // por líder/rol/persona — no se puede filtrar. Con un filtro de persona
+    // activo, este respaldo dejaría de tener sentido (mostraría el área
+    // entera, ignorando el filtro), así que solo se usa sin filtro activo.
+    if(!colabM && !filtroPersonaActivo){
       var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0];
       colabM = actM ? (actM.activos||0) : 0;
       huboFallback = true;
@@ -3024,7 +3056,7 @@ function renderConsolidada(){
   // _conEsAsignadora); en su lugar se pinta el bloque de consumo por
   // programa a nivel de toda la compañía.
   if (esAsignadora) { _conRenderAsignadora(per, area); }
-  else { _conRenderAjustes(rows, area, per, hAju, hTot); }
+  else { _conRenderAjustes(rowsKPI, area, per, hAju, hTot); }
 
   // BLOQUE 🅒 / 🅓 — En qué se fue el tiempo · Horas No Facturables
   // Fuente preferida: personas_detalle (tiene persona+programa+componente).
@@ -3354,6 +3386,16 @@ function _conRenderCompromiso(area, per){
 
   var ano=per.split('-')[0];
   var mesNum=parseInt(per.split('-')[1],10);
+  // v2.19 (ver D-026) — respeta el toggle Mensual/Consolidado (HDR_MODO), en
+  // vez de acumular siempre ene-hasta-el-mes-seleccionado. En modo Mensual
+  // (`_conVentanaActual` null) se compara solo el mes elegido (`_conMatch`
+  // se comporta igual que `p===per`, cero cambio de comportamiento respecto
+  // a antes de este fix salvo que ahora es "ese mes" en vez de "acumulado").
+  // En modo Consolidado se usa la MISMA ventana de meses con datos reales del
+  // año (`_conVentanaActual`/`periodosVentana`, ver _conPeriodosAnio) que ya
+  // usa el resto del módulo — nunca se proyecta a 12 meses.
+  var periodosVentanaComp = _conVentanaActual ? Object.keys(_conVentanaActual).sort() : [per];
+  var multPpto = periodosVentanaComp.length;
 
   // PPTO por programa (para el area actual) del array horas_contratadas
   var pptoArr = DASH.horas_contratadas||[];
@@ -3384,13 +3426,12 @@ function _conRenderCompromiso(area, per){
     }
   });
 
-  // Ejecutado acumulado ene-may (o hasta el mes seleccionado)
-  // Regla: acumulado del año hasta el mes seleccionado
+  // Ejecutado: en modo Mensual, solo el mes seleccionado; en modo Consolidado,
+  // la ventana de meses con datos reales del año (ver comentario arriba).
   var ejec={};  // prog_normalizado -> {hF, hNF, hAju, tot, mesesConDatos}
   (DASH.programas_detalle||[]).forEach(function(x){
     if(x.area!==area) return;
-    if(!x.p.startsWith(ano)) return;
-    if(x.p > per) return;  // hasta el mes seleccionado
+    if(!_conMatch(x.p,per)) return;
     var k=_conNorm(x.prog);
     if(!ejec[k]) ejec[k]={prog:x.prog,hF:0,hNF:0,hAju:0,tot:0,meses:{}};
     ejec[k].tot += x.horas||0;
@@ -3419,7 +3460,7 @@ function _conRenderCompromiso(area, per){
 
   var arr = Object.keys(todos).map(function(k){
     var t=todos[k];
-    var pptoAcum = (t.ppto_mes||0) * mesNum;
+    var pptoAcum = (t.ppto_mes||0) * multPpto;
     var ejecTot = t.ejec?t.ejec.tot:0;
     var pct = pptoAcum>0 ? ejecTot/pptoAcum*100 : null;
     return {
@@ -3450,9 +3491,10 @@ function _conRenderCompromiso(area, per){
   var enRojo = arr.filter(function(x){return x.pct!=null && x.pct>100;}).length;
   var enVerde = arr.filter(function(x){return x.pct!=null && x.pct<=100;}).length;
 
-  document.getElementById('conCompTag').textContent = ano+' hasta '+per.split('-')[1]+' — '+arr.length+' programas';
+  var lblPeriodo = _conVentanaActual ? _conVentanaLabel(per) : ('mes '+per.split('-')[1]+'/'+ano);
+  document.getElementById('conCompTag').textContent = lblPeriodo+' — '+arr.length+' programas';
   kpisEl.innerHTML =
-    '<div class="kc"><div class="klbl">PPTO acumulado</div><div class="kval" style="font-size:16px">'+Math.round(pptoTot).toLocaleString('es-CO')+'h</div><div class="kdelta nu">ene-'+per.split('-')[1]+' asignado</div></div>'
+    '<div class="kc"><div class="klbl">'+(_conVentanaActual?'PPTO acumulado':'PPTO del mes')+'</div><div class="kval" style="font-size:16px">'+Math.round(pptoTot).toLocaleString('es-CO')+'h</div><div class="kdelta nu">'+lblPeriodo+' asignado</div></div>'
     +'<div class="kc"><div class="klbl">Ejecutado</div><div class="kval" style="font-size:16px">'+Math.round(ejecTot).toLocaleString('es-CO')+'h</div><div class="kdelta nu">reportado a Jira</div></div>'
     +'<div class="kc"><div class="klbl">% Global</div><div class="kval" style="font-size:16px;color:'+(pctG==null?'var(--muted)':pctG>100?'#A32D2D':pctG>=85?'#BA7517':'#1D9E75')+'">'+(pctG==null?'s/d':Math.round(pctG)+'%')+'</div><div class="kdelta nu">ejec / PPTO</div></div>'
     +'<div class="kc"><div class="klbl">Programas en rojo</div><div class="kval" style="font-size:16px;color:#A32D2D">'+enRojo+'</div><div class="kdelta nu">'+enVerde+' dentro del PPTO</div></div>';
@@ -3491,7 +3533,7 @@ function _conRenderCompromiso(area, per){
 
     // Fila expandida con detalle
     if(conCompOpen===x.key && x.ejec>0){
-      row += _conCompDetalle(x, area, ano, mesNum);
+      row += _conCompDetalle(x, area, per);
     }
     return row;
   }).join('');
@@ -3504,12 +3546,15 @@ function conCompToggle(key){
   renderConsolidada();
 }
 
-function _conCompDetalle(x, area, ano, mesNum){
-  // Detalle expandido: componentes + personas + timeline del programa dentro del área
+function _conCompDetalle(x, area, per){
+  // Detalle expandido: componentes + personas + timeline del programa dentro
+  // del área. v2.19 (ver D-026): ahora recibe `per` (no ano/mesNum sueltos) y
+  // usa `_conMatch`, así que respeta la misma ventana Mensual/Consolidado que
+  // ya calculó `_conRenderCompromiso` (mismo mes exacto, o la ventana de
+  // meses con datos reales del año — nunca ene-hasta-mes fijo).
   var progName = x.prog;
-  // filtro: mismo area, mismo programa, año hasta mes actual
   var rows=(DASH.programas_detalle||[]).filter(function(y){
-    return y.area===area && _conNorm(y.prog)===_conNorm(progName) && y.p.startsWith(ano) && y.p<=ano+'-'+(mesNum<10?'0'+mesNum:mesNum);
+    return y.area===area && _conNorm(y.prog)===_conNorm(progName) && _conMatch(y.p,per);
   });
 
   // Componentes
@@ -3520,21 +3565,36 @@ function _conCompDetalle(x, area, ano, mesNum){
   var byM={}; rows.forEach(function(y){ byM[y.p]=(byM[y.p]||0)+(y.horas||0); });
   var mesesArr=Object.keys(byM).sort();
 
-  // Personas del área trabajando en este programa (aprox: si tiene personas_por_periodo con área+mes coincidentes)
-  // Como personas_por_periodo no distingue programa, aproximamos con nombres que reportan en el área en esos meses
+  // Personas ESPECÍFICAS de este programa — v2.19 (ver D-026): antes salía de
+  // personas_por_periodo, que no distingue programa (mostraba el total de la
+  // persona en TODA el área). Ahora sale de personas_detalle, que sí trae
+  // `prog`, filtrado por área+programa (normalizado, igual que `rows` arriba)
+  // + la misma ventana Mensual/Consolidado — así el usuario puede ver quién
+  // gastó más horas específicamente en este programa.
   var personasSet=[];
-  (DASH.personas_por_periodo||[]).forEach(function(p){
-    if(p.area===area && p.p.startsWith(ano) && p.p<=ano+'-'+(mesNum<10?'0'+mesNum:mesNum)){
+  var conPersonaProg = false;
+  (DASH.personas_detalle||[]).forEach(function(p){
+    if(p.area===area && _conNorm(p.prog||'')===_conNorm(progName) && _conMatch(p.p,per) && p.persona){
+      conPersonaProg = true;
       var ya=personasSet.filter(function(z){return z.persona===p.persona;})[0];
-      if(!ya){ personasSet.push({persona:p.persona, hF:p.hF||0, hNF:p.hNF||0, hAju:p.hAjustes||0}); }
-      else { ya.hF+=p.hF||0; ya.hNF+=p.hNF||0; ya.hAju+=p.hAjustes||0; }
+      var esNF = p.fact==='NF';
+      var esAju = _conAjusteRe(p.comp);
+      if(!ya){ ya={persona:p.persona, hF:0, hNF:0, hAju:0}; personasSet.push(ya); }
+      if(esNF) ya.hNF+=p.horas||0; else ya.hF+=p.horas||0;
+      if(esAju) ya.hAju+=p.horas||0;
     }
   });
   personasSet.sort(function(a,b){return (b.hF+b.hNF)-(a.hF+a.hNF);});
 
   var maxM = mesesArr.length?Math.max.apply(null,mesesArr.map(function(m){return byM[m];})):1;
+  var colPct = x.pct==null?'var(--muted)':x.pct>100?'#A32D2D':x.pct>=85?'#BA7517':'#1D9E75';
+  var lblPct = x.pct==null?'sin PPTO':Math.round(x.pct)+'%'+(x.pct>100?' — sobreejecutado':'');
 
   var html = '<tr><td colspan="7" style="padding:12px 16px;background:var(--bg);border-bottom:2px solid #185FA5">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 10px;background:var(--surf);border-radius:6px">'
+      +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;font-weight:600">% de ejecución del programa</div>'
+      +'<div style="font-size:15px;font-weight:700;color:'+colPct+'">'+lblPct+'</div>'
+    +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'
     // Columna 1: componentes + timeline
     +'<div>'
@@ -3560,11 +3620,11 @@ function _conCompDetalle(x, area, ano, mesNum){
         +'<div style="padding:8px;background:var(--surf);border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">NO FACT.</div><div style="font-size:14px;font-weight:700;color:#BA7517">'+Math.round(x.hNF)+'h</div></div>'
         +'<div style="padding:8px;background:var(--surf);border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">AJUSTES</div><div style="font-size:14px;font-weight:700;color:#A32D2D">'+Math.round(x.hAju)+'h</div></div>'
       +'</div>'
-      +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;font-weight:600;margin-bottom:6px">Personas del area (nota: horas totales de la persona en el area, no solo este programa)</div>'
-      + (personasSet.length?personasSet.slice(0,10).map(function(p){
+      +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;font-weight:600;margin-bottom:6px">Quién gastó horas en este programa (orden descendente)</div>'
+      + (conPersonaProg && personasSet.length?personasSet.slice(0,10).map(function(p){
           var tot=p.hF+p.hNF;
-          return '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px dashed var(--bdr)"><span>'+p.persona+'</span><span>F '+Math.round(p.hF)+' · NF '+Math.round(p.hNF)+(p.hAju?' · Aju '+Math.round(p.hAju):'')+'</span></div>';
-        }).join(''):'<div style="color:var(--muted);font-size:11px;padding:6px">Sin data por persona (necesita ETL con personas_por_periodo).</div>')
+          return '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px dashed var(--bdr)"><span>'+p.persona+'</span><span style="font-weight:600">'+Math.round(tot)+'h</span><span style="color:var(--muted)">F '+Math.round(p.hF)+' · NF '+Math.round(p.hNF)+(p.hAju?' · Aju '+Math.round(p.hAju):'')+'</span></div>';
+        }).join(''):'<div style="color:var(--muted);font-size:11px;padding:6px">Sin detalle por persona para este programa (fuera de la ventana del ETL que trae personas_detalle).</div>')
     +'</div>'
     +'</div>'
   +'</td></tr>';
@@ -3825,6 +3885,21 @@ function _cmpDetalle(x, ano, mesNum){
  * de "Enero..Mayo" que nunca se leian en ningun render*, y capSelProg/capSelArea
  * se poblaban desde arreglos mock siempre vacios). Ahora se generan desde los
  * datos reales y SI filtran cada panel — ver _capFiltros/_capRowsProg/_capRowsPersona.
+ *
+ * v2.20 (ver D-027): el usuario reportó que esta pestaña "no cambia con los
+ * filtros" — en realidad el bug era que #capSelMes es un selector PROPIO de
+ * esta pestaña, totalmente desconectado del selector de Año/Mes y del botón
+ * Mensual/Consolidado del header (arriba del dashboard). El usuario mueve el
+ * selector del header (donde ya está acostumbrado a filtrar todo lo demás,
+ * incluida Vista Consolidada) y esta pestaña, al tener su propio #capSelMes
+ * fijo en "Todos los meses" por defecto, nunca se enteraba. Fix: nueva opción
+ * "Sigue selector superior" (valor 'header', primera y por defecto) que
+ * resuelve el período a partir de VM.periodoSel + HDR_MODO — un solo mes en
+ * modo Mensual, o la ventana de meses con datos reales del año en modo
+ * Consolidado (mismo criterio que _conPeriodosAnio de Vista Consolidada,
+ * reutilizada aquí — nunca proyecta a 12 meses). El usuario puede seguir
+ * eligiendo un mes específico o "Todos los meses" manualmente si quiere anular
+ * el selector del header sin tocarlo.
  */
 function poblarSelectsCap(){
   var ms=document.getElementById('capSelMes'), ps=document.getElementById('capSelProg'), as=document.getElementById('capSelArea');
@@ -3832,7 +3907,7 @@ function poblarSelectsCap(){
   if(!ms.dataset.pobl){
     var per={}; (DASH.programas_detalle||[]).forEach(function(x){ if(x.p) per[x.p]=true; });
     var arrP=Object.keys(per).sort().reverse();
-    ms.innerHTML='<option value="all">Todos los meses</option>'+arrP.map(function(p){
+    ms.innerHTML='<option value="header">Sigue selector superior</option><option value="all">Todos los meses</option>'+arrP.map(function(p){
       var mm=parseInt(p.split('-')[1],10);
       return '<option value="'+p+'">'+(_MESNOM[mm]||p.split('-')[1])+' '+p.split('-')[0]+'</option>';
     }).join('');
@@ -3849,15 +3924,43 @@ function poblarSelectsCap(){
     as.dataset.pobl='1';
   }
 }
+/** Períodos a usar cuando #capSelMes = "Sigue selector superior": un solo mes
+ * en modo Mensual, o la ventana con datos reales del año en modo Consolidado
+ * (reutiliza _conPeriodosAnio, definida en el módulo de Vista Consolidada). */
+function _capPeriodosHeader(){
+  if(typeof VM==='undefined' || !VM || !VM.periodoSel) return null;
+  var anio=VM.periodoSel.split('-')[0];
+  if(typeof HDR_MODO!=='undefined' && HDR_MODO==='anual' && typeof _conPeriodosAnio==='function'){
+    var v=Object.keys(_conPeriodosAnio(anio)).sort();
+    return v.length ? v : [VM.periodoSel];
+  }
+  return [VM.periodoSel];
+}
 function _capFiltros(){
   var ms=document.getElementById('capSelMes'), ps=document.getElementById('capSelProg'), as=document.getElementById('capSelArea');
-  return { mes: ms?ms.value:'all', prog: ps?ps.value:'all', area: as?as.value:'all' };
+  var val = ms ? ms.value : 'header';
+  var periodos = null;  // null = todos los meses (sin filtro de período)
+  if(val==='header' || val==='') periodos = _capPeriodosHeader();
+  else if(val!=='all') periodos = [val];
+  return { periodos: periodos, prog: ps?ps.value:'all', area: as?as.value:'all' };
+}
+/** Etiqueta legible del período activo (para subtítulos de KPIs y tablas). */
+function _capPeriodoLabel(f){
+  if(!f.periodos || !f.periodos.length) return 'todos los meses';
+  if(f.periodos.length===1){
+    var p=f.periodos[0], mm=parseInt(p.split('-')[1],10);
+    return (_MESNOM[mm]||p.split('-')[1])+' '+p.split('-')[0];
+  }
+  var arr=f.periodos.slice().sort();
+  var mIni=parseInt(arr[0].split('-')[1],10), mFin=parseInt(arr[arr.length-1].split('-')[1],10);
+  var nIni=(_MESNOM[mIni]||'').slice(0,3), nFin=(_MESNOM[mFin]||'').slice(0,3);
+  return arr[0].split('-')[0]+' ('+nIni+'-'+nFin+', '+arr.length+' meses)';
 }
 /** programas_detalle filtrado por los 3 selectores — cubre todo el histórico, sin persona. */
 function _capRowsProg(){
   var f=_capFiltros();
   return (DASH.programas_detalle||[]).filter(function(x){
-    if(f.mes!=='all' && x.p!==f.mes) return false;
+    if(f.periodos && f.periodos.indexOf(x.p)<0) return false;
     if(f.prog!=='all' && x.prog!==f.prog) return false;
     if(f.area!=='all' && x.area!==f.area) return false;
     return true;
@@ -3867,7 +3970,7 @@ function _capRowsProg(){
 function _capRowsPersona(){
   var f=_capFiltros();
   return (DASH.personas_detalle||[]).filter(function(x){
-    if(f.mes!=='all' && x.p!==f.mes) return false;
+    if(f.periodos && f.periodos.indexOf(x.p)<0) return false;
     if(f.prog!=='all' && x.prog!==f.prog) return false;
     if(f.area!=='all' && x.area!==f.area) return false;
     return true;
@@ -3886,9 +3989,9 @@ function renderCap(){
   var filtradas=_capRowsProg();
   var reg=filtradas.reduce(function(s,x){return s+(x.horas||0);},0);
 
-  // Horas disponibles: respeta mes + area (la capacidad de un area no se divide por programa).
+  // Horas disponibles: respeta período + area (la capacidad de un area no se divide por programa).
   var periodosSet={}; (DASH.programas_detalle||[]).forEach(function(x){ periodosSet[x.p]=true; });
-  var periodosBase = f.mes!=='all' ? [f.mes] : Object.keys(periodosSet);
+  var periodosBase = f.periodos || Object.keys(periodosSet);
   var disp=0;
   periodosBase.forEach(function(p){
     var res=(DASH.areas_mo_por_periodo||[]).filter(function(r){return r.periodo===p;})[0];
@@ -3900,7 +4003,7 @@ function renderCap(){
   var util=disp?reg/disp*100:0, sin=Math.max(0,disp-reg);
   var st=function(id,v){var e=document.getElementById(id); if(e) e.textContent=v;};
   st('capKReg',Math.round(reg).toLocaleString('es-CO')+'h');
-  st('capKRegSub',(f.mes==='all'?'todos los meses':f.mes)+(f.area!=='all'?' · '+f.area:'')+(f.prog!=='all'?' · '+f.prog:''));
+  st('capKRegSub',_capPeriodoLabel(f)+(f.area!=='all'?' · '+f.area:'')+(f.prog!=='all'?' · '+f.prog:''));
   st('capKDisp',Math.round(disp).toLocaleString('es-CO')+'h');
   st('capKUtil',util.toFixed(1)+'%'); st('capKUtilSub',Math.round(reg).toLocaleString('es-CO')+' / '+Math.round(disp).toLocaleString('es-CO')+'h');
   st('capKSin',Math.round(sin).toLocaleString('es-CO')+'h'); st('capKSinSub',(disp?Math.round(sin/disp*100):0)+'% sin imputar');
@@ -3959,15 +4062,26 @@ function renderCapOrfanos(){
 function renderCapUtilArea(){
   var d=document.getElementById('capUtilArea'); if(!d||!DASH) return;
   var msg=document.getElementById('capUtilAreaMsg'); if(msg) msg.innerHTML='';
+  // v2.20 (ver D-027): antes esto SIEMPRE mostraba el año completo del header
+  // (VM.periodoSel), sin importar el selector de mes/modo de esta pestaña —
+  // por eso cambiar de mes o de Mensual/Consolidado no movía este bloque para
+  // nada. Ahora respeta el mismo período resuelto por #capSelMes
+  // (_capFiltros().periodos): un mes exacto, la ventana Consolidado, o el año
+  // completo del header cuando el usuario elige explícitamente "Todos los
+  // meses" (mismo comportamiento histórico en ese caso puntual).
+  var f=_capFiltros();
   var yr=(VM&&VM.periodoSel)?VM.periodoSel.split('-')[0]:'2026';
+  var periodos=f.periodos;
+  var matchPeriodo = periodos ? function(p){return periodos.indexOf(p)>=0;} : function(p){return (p||'').split('-')[0]===yr;};
+  var tagEl=document.getElementById('capUtilAreaTag'); if(tagEl) tagEl.textContent = periodos ? _capPeriodoLabel(f) : yr+' completo';
   // numerador: horas Jira por area
-  var num={}; (DASH.programas_detalle||[]).forEach(function(x){ if((x.p||'').split('-')[0]===yr){ var a=x.area||'SIN ÁREA'; num[a]=(num[a]||0)+(x.horas||0); } });
+  var num={}; (DASH.programas_detalle||[]).forEach(function(x){ if(matchPeriodo(x.p)){ var a=x.area||'SIN ÁREA'; num[a]=(num[a]||0)+(x.horas||0); } });
   // denominador: colaboradores x tiempo_laboral por area (meses con datos)
-  var den={}; (DASH.areas_mo_por_periodo||[]).forEach(function(r){ if(r.periodo.split('-')[0]!==yr) return; var tl=r.tiempo_laboral||0; var pa=r.por_area||{}; Object.keys(pa).forEach(function(a){ den[a]=(den[a]||0)+((pa[a].colab||0)*tl); }); });
+  var den={}; (DASH.areas_mo_por_periodo||[]).forEach(function(r){ if(!matchPeriodo(r.periodo)) return; var tl=r.tiempo_laboral||0; var pa=r.por_area||{}; Object.keys(pa).forEach(function(a){ den[a]=(den[a]||0)+((pa[a].colab||0)*tl); }); });
   var rows=Object.keys(num).map(function(a){ var nn=num[a]||0, dd=den[a]||0; return {a:a, num:nn, den:dd, util: dd? nn/dd*100 : null}; })
      .filter(function(r){ return r.num>0; })
      .sort(function(x,y){ return (y.util==null?-1:y.util)-(x.util==null?-1:x.util); });
-  if(!rows.length){ d.innerHTML='<div class="csub">Sin horas en '+yr+'.</div>'; return; }
+  if(!rows.length){ d.innerHTML='<div class="csub">Sin horas en '+_capPeriodoLabel(f)+'.</div>'; return; }
   // aviso si todo esta sin area
   if(rows.length===1 && rows[0].a==='SIN ÁREA'){
     if(msg) msg.innerHTML='<div style="padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:#BA7517">Todas las horas estan como <strong>SIN ÁREA</strong>. Ejecuta el ETL (<code>main</code>) con el mapeo de Usuarios_Jira y aqui veras la utilizacion real por equipo.</div>';
