@@ -2718,18 +2718,26 @@ function cfBarras(blockId, dim, arr, colorSel, colorBase, topN){
  * acento distinto en la fuente.
  */
 var _AREAS_ASIGNADORAS = ['ENGAGEMENT','ECOSISTEMAS'];
-// v2.21 (ver D-028) — vista personalizada para Tatiana Estupiñán (Gerencia
-// General): a diferencia de un líder normal, ella no está atada a un área de
-// Jira — necesita ver la compañía COMPLETA consolidada. En vez de intentar
-// resolverla como un líder real de `personas_por_periodo` (no tiene horas
-// propias en Jira, así que no resolvería a nada), se le trata como un chip
-// de líder "especial" que resuelve siempre a la seudo-área `_AREA_TODAS`.
+// v2.22 (ver D-028/D-029) — vista personalizada para Tatiana Estupiñán
+// (Gerencia General): a diferencia de un líder normal, ella necesita ver la
+// compañía COMPLETA consolidada, no un área. v2.21 la agregaba como un chip
+// SINTÉTICO aparte — pero ella YA existe como líder real en
+// `personas_por_periodo` (tiene gente a cargo con horas en Jira), así que
+// terminaba duplicada: su chip real "Tatiana Estupiñan Duarte" Y el chip
+// inventado, uno al lado del otro (reportado por el usuario). Fix: no se
+// inyecta ningún chip nuevo — se reutiliza su chip real, y `_conResolverArea`
+// la reconoce por nombre (normalizado, sin tildes/mayúsculas, vía
+// `_conEsLiderGG`) y la resuelve a la seudo-área `_AREA_TODAS` en vez de a
+// la única área que resolvería por horas en Jira.
 // `_conAreaMatch` es el único punto de comparación de área usado en este
-// módulo desde este fix: con área normal se comporta igual que `===`
-// (cero cambio de comportamiento para los demás líderes), y con
-// `_AREA_TODAS` no filtra nada (todas las áreas cuentan).
-var _LIDER_GG = 'Tatiana Estupiñán';
+// módulo desde v2.21: con área normal se comporta igual que `===` (cero
+// cambio de comportamiento para los demás líderes), y con `_AREA_TODAS` no
+// filtra nada (todas las áreas cuentan).
+var _LIDER_GG = 'Tatiana Estupiñan Duarte';
 var _AREA_TODAS = '__TODAS__';
+function _conEsLiderGG(nombre){
+  return !!nombre && _conNorm(nombre) === _conNorm(_LIDER_GG);
+}
 function _conAreaMatch(xArea, area){
   return area === _AREA_TODAS ? true : xArea === area;
 }
@@ -2804,15 +2812,15 @@ function _conPoblarSelectores(){
   selM.style.opacity = esAnual ? '0.5' : '1';
 }
 
-/** Lideres distintos vistos en cualquier período de personas_por_periodo,
- * más el chip especial de Gerencia General (_LIDER_GG) al final, que no
- * sale de los datos — ver _conResolverArea. */
+/** Lideres distintos vistos en cualquier período de personas_por_periodo.
+ * v2.22: ya NO se inyecta un chip sintético para Gerencia General — Tatiana
+ * ya aparece aquí como líder real (tiene gente a cargo con horas en Jira);
+ * `_conResolverArea` la reconoce por nombre (ver _conEsLiderGG) y la resuelve
+ * distinto, sin necesidad de un chip aparte que duplicaba el suyo. */
 function _conLideresDisp(){
   var s={};
   (DASH.personas_por_periodo||[]).forEach(function(p){ if(p.lider) s[p.lider]=true; });
-  var arr=Object.keys(s).sort();
-  arr.push(_LIDER_GG);
-  return arr;
+  return Object.keys(s).sort();
 }
 function _conRenderLiderChips(){
   var c=document.getElementById('conLiderChips'); if(!c) return;
@@ -2843,10 +2851,11 @@ function _conLiderToggle(nombre){
  *      default histórico de cuando existía el selector de Área).
  */
 function _conResolverArea(per){
-  // Gerencia General (chip especial, ver _LIDER_GG): siempre compañía
-  // completa, sin importar Rol/Persona residuales (ya se limpian al
-  // cambiar de líder en _conLiderToggle).
-  if(conSelLider === _LIDER_GG) return _AREA_TODAS;
+  // Gerencia General (líder real, ver _LIDER_GG/_conEsLiderGG): siempre
+  // compañía completa, sin importar Rol/Persona residuales (ya se limpian al
+  // cambiar de líder en _conLiderToggle) ni el área que resolvería por sus
+  // propias horas en Jira.
+  if(_conEsLiderGG(conSelLider)) return _AREA_TODAS;
   if(conSelPersona){
     var found=(DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && p.persona===conSelPersona;})[0];
     if(found && found.area) return found.area;
@@ -2906,11 +2915,11 @@ function _conPoblarFiltrosPersona(per){
   var selR=document.getElementById('conRol'), selP=document.getElementById('conPersonaSel');
   if(!selR||!selP) return;
   var key = conSelLider+'|'+per+'|'+(_conVentanaActual?'anual':'mensual');
-  // v2.21 (ver D-028): con Gerencia General (_LIDER_GG) el líder no es un
-  // valor real en `lider` de personas_por_periodo (no ejecuta Jira), así que
-  // filtrar por `p.lider===conSelLider` dejaría estos selects siempre vacíos.
-  // Para ella, Rol/Persona se llenan con TODA la compañía (sin filtro de líder).
-  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && (!conSelLider || conSelLider===_LIDER_GG || p.lider===conSelLider);});
+  // v2.21/v2.22 (ver D-028/D-029): aunque Gerencia General SÍ es un líder
+  // real (tiene gente a cargo), su vista es la compañía completa — filtrar
+  // Rol/Persona solo a SUS subordinados directos contradiría eso. Para ella,
+  // esos selects se llenan con TODA la compañía (sin filtro de líder).
+  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && (!conSelLider || _conEsLiderGG(conSelLider) || p.lider===conSelLider);});
 
   if(key !== _conFiltrosKey){
     _conFiltrosKey = key;
@@ -2949,7 +2958,7 @@ function _conPersonasPermitidas(area, per){
   var set={};
   (DASH.personas_por_periodo||[]).filter(function(p){
     return _conAreaMatch(p.area,area) && _conMatch(p.p,per)
-      && (!conSelLider || conSelLider===_LIDER_GG || p.lider===conSelLider)
+      && (!conSelLider || _conEsLiderGG(conSelLider) || p.lider===conSelLider)
       && (!conSelRol || p.rol===conSelRol)
       && (!conSelPersona || p.persona===conSelPersona);
   }).forEach(function(p){ if(p.persona) set[p.persona]=true; });
@@ -2967,14 +2976,13 @@ function renderConsolidada(){
   _conSetVentana(per);
   var area=_conResolverArea(per);
   if(!area) return;
-  // v2.21 (ver D-028): el chip de Gerencia General NO cuenta como "filtro de
-  // persona activo" — su selección ES el criterio de área (compañía
-  // completa), no una restricción sobre ella. Si además se llega a elegir
-  // Rol/Persona con ella activa, esos sí siguen contando como filtro (pero
-  // ver limitación en _conPoblarFiltrosPersona: hoy esos selects se llenan
-  // a partir de `lider===conSelLider`, y nadie tiene ese líder literal en
-  // Jira, así que quedarán vacíos — queda como mejora futura).
-  var esGG = (conSelLider === _LIDER_GG);
+  // v2.21/v2.22 (ver D-028/D-029): el chip de Gerencia General NO cuenta como
+  // "filtro de persona activo" — su selección ES el criterio de área
+  // (compañía completa), no una restricción sobre ella. Si además elige
+  // Rol/Persona, esos sí siguen contando como filtro (y sí funcionan: ver
+  // _conPoblarFiltrosPersona, que para ella llena esos selects con TODA la
+  // compañía en vez de solo sus subordinados directos).
+  var esGG = _conEsLiderGG(conSelLider);
   var filtroPersonaActivo = !!((conSelLider && !esGG) || conSelRol || conSelPersona);
   var personasPermitidas = filtroPersonaActivo ? _conPersonasPermitidas(area, per) : null;
   document.getElementById('conTitle').textContent = esGG ? 'Gerencia General' : area;
