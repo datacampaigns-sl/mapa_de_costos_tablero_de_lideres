@@ -3154,7 +3154,7 @@ function renderConsolidada(){
   // programa a nivel de toda la compañía + errores/ajustes por área
   // (_conRenderAjustesPorArea, ver D-028 — pedido explícito de Tatiana
   // Estupiñán/Gerencia General, pero se activa para cualquier asignadora).
-  if (esAsignadora) { _conRenderAsignadora(per, area); _conRenderAjustesPorArea(per); }
+  if (esAsignadora) { _conRenderAsignadora(per, area, filtroPersonaActivo, personasPermitidas); _conRenderAjustesPorArea(per, area, filtroPersonaActivo, personasPermitidas); }
   else { _conRenderAjustes(rowsKPI, area, per, hAju, hTot); }
 
   // BLOQUE 🅒 / 🅓 — En qué se fue el tiempo · Horas No Facturables
@@ -3214,6 +3214,22 @@ function _conFiltroProgramasAsignadora(area, rows){
   }
   return rows;
 }
+// v2.26 (ver D-033) — pedido explícito del usuario: "en los consolidados de
+// engagement y ecosistemas excluyamos el área administrativa porque su
+// carga es full a superlikers y estamos tergiversando la información".
+// Administración solo reporta contra el programa SuperLikers, así que
+// dejarla dentro de las vistas de compañía-completa de Engagement/
+// Ecosistemas infla artificialmente ese programa frente a los demás. Se
+// excluye SOLO para esas dos áreas asignadoras — Gerencia General
+// (_AREA_TODAS) sigue viendo la compañía sin restricciones, a propósito,
+// porque a ella sí le corresponde ver el total real incluyendo Administración.
+function _conExcluirAdminAsignadora(area, rows){
+  var an = _conNorm(area);
+  if (an === 'ECOSISTEMAS' || an === 'ENGAGEMENT') {
+    return rows.filter(function(x){ return _conNorm(x.area||'') !== 'ADMINISTRACION'; });
+  }
+  return rows;
+}
 /**
  * Bloque para áreas asignadoras (Engagement, Ecosistemas — ver
  * _conEsAsignadora). Estas áreas no ejecutan la tarea en Jira, la asignan a
@@ -3229,26 +3245,56 @@ function _conFiltroProgramasAsignadora(area, rows){
  * propósito, es la única forma de ver "toda la compañía" (sí se filtra por
  * programa, ver arriba).
  */
-function _conRenderAsignadora(per, area){
-  var rowsTodas=(DASH.programas_detalle||[]).filter(function(x){return _conMatch(x.p,per);});
+function _conRenderAsignadora(per, area, filtroPersonaActivo, personasPermitidas){
+  // v2.25 (ver D-032) — el usuario reportó que al filtrar por Rol/Persona
+  // estos dos bloques (Consumo por programa, Desglose Programa×Área×
+  // Componente) seguían mostrando la compañía COMPLETA sin importar el
+  // filtro — con razón: antes ignoraban por completo Rol/Líder/Persona, a
+  // propósito, porque por diseño son "vista de toda la compañía" para
+  // líderes asignadores. Pero un filtro activo debe filtrar, siempre — así
+  // que ahora, si hay Rol/Líder/Persona elegido, la fuente cambia de
+  // `programas_detalle` (sin persona) a `personas_detalle` (con persona),
+  // restringida a las personas permitidas por ese filtro. Sin filtro activo,
+  // el comportamiento es idéntico al de antes (compañía completa).
+  var rowsTodas;
+  if (filtroPersonaActivo) {
+    rowsTodas = (DASH.personas_detalle||[]).filter(function(x){
+      return _conMatch(x.p,per) && personasPermitidas[x.persona];
+    });
+  } else {
+    rowsTodas = (DASH.programas_detalle||[]).filter(function(x){return _conMatch(x.p,per);});
+  }
   rowsTodas = _conFiltroProgramasAsignadora(area, rowsTodas);
+  rowsTodas = _conExcluirAdminAsignadora(area, rowsTodas);
   var tagEl=document.getElementById('conAsigTag');
-  if(tagEl) tagEl.textContent = _conVentanaLabel(per)+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas';
+  if(tagEl) tagEl.textContent = _conVentanaLabel(per)+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas'+(filtroPersonaActivo?' (filtrado)':'');
   var _an=_conNorm(area);
   var _subTxt = area===_AREA_TODAS
     ? 'Facturable vs No Facturable por programa — TODOS los programas de la compañia (vista de Gerencia General, sin restriccion)'
     : _an==='ECOSISTEMAS'
-    ? 'Facturable vs No Facturable por programa — solo SuperLikers, SuperMeseros y SuperVendedores (alcance actual de Ecosistemas)'
+    ? 'Facturable vs No Facturable por programa — solo SuperLikers, SuperMeseros y SuperVendedores (alcance actual de Ecosistemas), excluye Administracion'
     : _an==='ENGAGEMENT'
-      ? 'Facturable vs No Facturable por programa — todos menos SuperMeseros y SuperVendedores (alcance actual de Engagement)'
+      ? 'Facturable vs No Facturable por programa — todos menos SuperMeseros y SuperVendedores (alcance actual de Engagement), excluye Administracion'
       : 'Facturable vs No Facturable por programa, todas las areas del mes seleccionado — vista para lideres que asignan Jiras a otras areas';
+  if (filtroPersonaActivo) _subTxt += ' — filtrado por Rol/Lider/Persona elegido arriba';
   var subEl=document.getElementById('conAsigSub'); if(subEl) subEl.textContent=_subTxt;
   var subElD=document.getElementById('conAsigDescSub');
-  if(subElD) subElD.textContent = area===_AREA_TODAS
+  var _subDTxt = area===_AREA_TODAS
     ? 'Que area ejecuto mas horas de cada programa este mes, entre TODAS las areas de la compañia · ordenado por horas desc'
     : (_an==='ECOSISTEMAS'||_an==='ENGAGEMENT')
     ? 'Que area consumio mas horas de cada programa este mes (dentro del alcance de arriba) · ordenado por horas desc'
     : 'Que area consumio mas horas de cada programa este mes · ordenado por horas desc';
+  if (filtroPersonaActivo) _subDTxt += ' — filtrado por Rol/Lider/Persona elegido arriba';
+  if(subElD) subElD.textContent = _subDTxt;
+  if (filtroPersonaActivo && !rowsTodas.length){
+    var elAsigEmpty = document.getElementById('conAsigDescBody');
+    // se sigue calculando el resto abajo con arrays vacíos (progsOrd=[],
+    // filas=[]), que ya rinden un mensaje "sin datos" — no hace falta cortar
+    // aquí; solo se documenta el caso porque `personas_detalle` tiene una
+    // ventana de datos más corta que `programas_detalle` (ver D-025) y un
+    // filtro de persona activo en un mes viejo puede legítimamente no tener
+    // nada que mostrar.
+  }
 
   // 1) F/NF por programa
   var porProg={};
@@ -3338,13 +3384,26 @@ function _conRenderAsignadora(per, area){
  * tenga asignado el líder que lo está mirando). Se activa para cualquier
  * área "asignadora" (ver _conEsAsignadora), no solo para Gerencia General.
  */
-function _conRenderAjustesPorArea(per){
+function _conRenderAjustesPorArea(per, area, filtroPersonaActivo, personasPermitidas){
+  // v2.26 (ver D-032/D-033) — mismo criterio que _conRenderAsignadora: si
+  // hay un filtro de Rol/Lider/Persona activo, la fuente pasa de
+  // programas_detalle (sin persona) a personas_detalle (con persona),
+  // restringida a las personas permitidas; y se excluye Administracion
+  // cuando el area es Engagement o Ecosistemas (ver _conExcluirAdminAsignadora).
   var d=document.getElementById('conAjuAreaBody'), tag=document.getElementById('conAjuAreaTag');
   if(!d) return;
-  var rows=(DASH.programas_detalle||[]).filter(function(x){ return _conMatch(x.p,per) && _conAjusteRe(x.comp); });
+  var rows;
+  if (filtroPersonaActivo) {
+    rows=(DASH.personas_detalle||[]).filter(function(x){
+      return _conMatch(x.p,per) && personasPermitidas[x.persona] && _conAjusteRe(x.comp);
+    });
+  } else {
+    rows=(DASH.programas_detalle||[]).filter(function(x){ return _conMatch(x.p,per) && _conAjusteRe(x.comp); });
+  }
+  rows = _conExcluirAdminAsignadora(area, rows);
   if(!rows.length){
     if(tag) tag.textContent='0h';
-    d.innerHTML='<div style="padding:12px;background:#E7F5EE;border-radius:8px;font-size:12px;color:#1D6E52"><strong>Sin ajustes/errores reportados en '+_conVentanaLabel(per)+' (ninguna área).</strong></div>';
+    d.innerHTML='<div style="padding:12px;background:#E7F5EE;border-radius:8px;font-size:12px;color:#1D6E52"><strong>Sin ajustes/errores reportados en '+_conVentanaLabel(per)+' (ninguna área)'+(filtroPersonaActivo?' con el filtro elegido':'')+'.</strong></div>';
     return;
   }
   var byArea={};
