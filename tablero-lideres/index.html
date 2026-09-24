@@ -191,8 +191,12 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
         <div class="psub">Horas PPTO comprometidas al programa vs horas realmente ejecutadas. Detecta programas fuera de control.</div>
 
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-          <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Hasta mes</div>
-            <select id="cmpMes" onchange="renderCompromiso()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer"></select></div>
+          <!-- v2.24 (ver D-031): se quitó el selector "Hasta mes" propio de
+               esta pestaña, por el mismo motivo que #conMes — dos controles
+               de período (este + el del header) confundían. Ahora sigue
+               siempre el Año/Mes del header, de solo lectura aquí. -->
+          <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Hasta mes (header)</div>
+            <div id="cmpMesLbl" style="font-size:14px;font-weight:600;padding:6px 10px">-</div></div>
           <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Mostrar</div>
             <select id="cmpFiltro" onchange="renderCompromiso()" style="font-size:14px;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer">
               <option value="all">Todos los programas</option>
@@ -283,8 +287,15 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
         <div class="card" style="margin-bottom:14px;background:linear-gradient(180deg,rgba(83,74,183,0.04),transparent);border-left:3px solid #534AB7">
           <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
             <div>
-              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Mes</div>
-              <select id="conMes" onchange="renderConsolidada()" style="font-size:14px;font-weight:600;padding:6px 10px;border-radius:8px;border:0.5px solid var(--bdr);background:var(--surf);color:var(--txt);cursor:pointer;min-width:130px"></select>
+              <!-- v2.24 (ver D-031): se quitó el selector de Mes propio de esta
+                   vista — el usuario reportó que tener dos controles de período
+                   (este + el Año/Mes/Modo del header) confundía, sobre todo
+                   porque hasta hace poco no estaban sincronizados. Ahora el
+                   único control de período de todo el dashboard es el del
+                   header; aquí solo se muestra, de solo lectura, qué período
+                   está aplicando este bloque. -->
+              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Periodo (header)</div>
+              <div id="conMesLbl" style="font-size:14px;font-weight:600;padding:6px 10px;min-width:130px">-</div>
             </div>
             <div>
               <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;font-weight:600">Rol / Sub-área</div>
@@ -2795,21 +2806,42 @@ function _conVentanaLabel(per){
   var nIni=(_MESNOM[mIni]||'').slice(0,3).toLowerCase(), nFin=(_MESNOM[mFin]||'').slice(0,3).toLowerCase();
   return arr[0].split('-')[0]+' ('+nIni+'-'+nFin+', '+arr.length+' meses)';
 }
+// v2.23 (ver D-030): #conMes es un selector de mes PROPIO de Vista
+// Consolidada, separado del Año/Mes del header — el usuario reportó
+// explícitamente que en la vista de Gerencia General (y, revisando, en
+// realidad en TODOS los líderes) nada se ajustaba al mover el Año/Mes del
+// header ni el toggle Mensual/Consolidado. Causa raíz: #conMes se poblaba
+// UNA SOLA VEZ con el mes más reciente con datos y nunca se volvía a
+// sincronizar — mismo bug que ya se había corregido en la pestaña Capacidad
+// (ver D-027) pero que aquí seguía sin arreglar. Fix: opción "Sigue selector
+// superior" (primera, por defecto) que seguirá el Año/Mes del header en cada
+// render; el usuario puede seguir fijando un mes puntual manualmente si
+// quiere anularlo, igual que en Capacidad.
+// v2.24 (ver D-031): #conMes (selector propio) se quitó — el único control
+// de período de todo el dashboard es ahora el Año/Mes/Modo del header. Esta
+// función solo calcula `conSelMes` a partir de él y pinta la etiqueta de
+// solo lectura #conMesLbl.
 function _conPoblarSelectores(){
-  var selM=document.getElementById('conMes');
-  if(!selM) return;
-  if(!selM.options.length){
-    var meses=_conMesesDisp();
-    selM.innerHTML=meses.map(function(m){var mm=parseInt(m.split('-')[1],10);return '<option value="'+m+'">'+(_MESNOM[mm]||m.split('-')[1])+' '+m.split('-')[0]+'</option>';}).join('');
-    if(!conSelMes && meses.length) conSelMes=meses[0];
-    selM.value=conSelMes;
-  }
-  conSelMes=selM.value;
-  // El mes deja de aplicar en modo anual (se usa el año completo, ver
-  // _conSetVentana) — mismo tratamiento visual que el selector del header.
+  var lbl=document.getElementById('conMesLbl');
+  var meses=_conMesesDisp();
+  var headerPer = (typeof VM!=='undefined' && VM && VM.periodoSel) ? VM.periodoSel : null;
+  if(headerPer && meses.indexOf(headerPer)>=0){ conSelMes = headerPer; }
+  else if(!conSelMes && meses.length){ conSelMes = meses[0]; }
+  // si el header apunta a un mes sin datos suficientes (ver _conMesesDisp,
+  // umbral >=100h), se conserva el último conSelMes válido en vez de
+  // vaciar la vista.
   var esAnual = (typeof HDR_MODO!=='undefined' && HDR_MODO==='anual');
-  selM.disabled = esAnual;
-  selM.style.opacity = esAnual ? '0.5' : '1';
+  if(lbl){
+    if(esAnual){
+      var anio = conSelMes ? conSelMes.split('-')[0] : (headerPer?headerPer.split('-')[0]:'-');
+      lbl.textContent = anio+' completo (Consolidado)';
+    } else if(conSelMes){
+      var mm=parseInt(conSelMes.split('-')[1],10);
+      lbl.textContent = (_MESNOM[mm]||conSelMes.split('-')[1])+' '+conSelMes.split('-')[0];
+    } else {
+      lbl.textContent='-';
+    }
+  }
 }
 
 /** Lideres distintos vistos en cualquier período de personas_por_periodo.
@@ -3761,16 +3793,17 @@ var cmpMes='', cmpFiltro='all', cmpOpen=null;
 
 function renderCompromiso(){
   if(!DASH) return;
-  var selM=document.getElementById('cmpMes'), selF=document.getElementById('cmpFiltro');
-  if(!selM) return;
-  // Poblar meses
-  if(!selM.options.length){
-    var meses=_conMesesDisp();  // reutiliza el helper
-    selM.innerHTML=meses.map(function(m){var mm=parseInt(m.split('-')[1],10);return '<option value="'+m+'">'+(_MESNOM[mm]||m.split('-')[1])+' '+m.split('-')[0]+'</option>';}).join('');
-    if(!cmpMes && meses.length) cmpMes=meses[0];
-    selM.value=cmpMes;
-  }
-  cmpMes=selM.value; cmpFiltro=selF.value;
+  var selF=document.getElementById('cmpFiltro');
+  if(!selF) return;
+  // v2.24 (ver D-031): #cmpMes (selector propio "Hasta mes") se quitó — sigue
+  // siempre el Año/Mes del header, igual que #conMes en Vista Consolidada.
+  var meses=_conMesesDisp();  // reutiliza el helper
+  var headerPer=(typeof VM!=='undefined' && VM && VM.periodoSel) ? VM.periodoSel : null;
+  if(headerPer && meses.indexOf(headerPer)>=0){ cmpMes=headerPer; }
+  else if(!cmpMes && meses.length){ cmpMes=meses[0]; }
+  var lbl=document.getElementById('cmpMesLbl');
+  if(lbl) lbl.textContent = cmpMes ? ((_MESNOM[parseInt(cmpMes.split('-')[1],10)]||cmpMes.split('-')[1])+' '+cmpMes.split('-')[0]) : '-';
+  cmpFiltro=selF.value;
   var ano=cmpMes.split('-')[0], mesNum=parseInt(cmpMes.split('-')[1],10);
   document.getElementById('cmpAnoTag').textContent = ano+' hasta '+cmpMes.split('-')[1];
 
