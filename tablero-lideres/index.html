@@ -2716,6 +2716,44 @@ function _conMesesDisp(){
   (DASH.programas_detalle||[]).forEach(function(x){ if(x.p) s[x.p]=(s[x.p]||0)+(x.horas||0); });
   return Object.keys(s).filter(function(p){return s[p]>=100;}).sort().reverse();
 }
+// v2.17 (ver D-024) — el botón Mensual/Consolidado del header (HDR_MODO)
+// nunca estuvo conectado a la Vista Consolidada del líder: esta vista tenía
+// su PROPIO selector de mes (#conMes), independiente del header, y siempre
+// filtraba por un único mes exacto (`x.p===per`) sin importar HDR_MODO. El
+// usuario reportó que al marcar "Consolidado" los KPIs seguían mostrando un
+// solo mes. Fix: `_conSetVentana(per)` calcula, una vez por render, el
+// conjunto de períodos a considerar — un solo mes en modo mensual (idéntico
+// al comportamiento anterior), o TODOS los períodos con datos reales del año
+// de `per` en modo anual (nunca meses futuros sin ejecutar todavía — "lo que
+// lleva del año", confirmado con el usuario: si estamos en septiembre, sólo
+// enero-septiembre, no se proyecta a 12). `_conMatch(p, per)` reemplaza cada
+// comparación `===per` suelta de este módulo por una consulta a esa ventana,
+// y en modo mensual es matemáticamente idéntica a la comparación de antes
+// (cero riesgo de romper el comportamiento ya validado).
+var _conVentanaActual = null;  // null = modo mensual (comparar exacto); objeto {periodo:true} = modo anual
+function _conPeriodosAnio(anio){
+  var s={};
+  (DASH.programas_detalle||[]).forEach(function(x){ if(x.p && x.p.split('-')[0]===anio) s[x.p]=true; });
+  (DASH.personas_por_periodo||[]).forEach(function(x){ if(x.p && x.p.split('-')[0]===anio) s[x.p]=true; });
+  (DASH.personas_detalle||[]).forEach(function(x){ if(x.p && x.p.split('-')[0]===anio) s[x.p]=true; });
+  (DASH.areas_mo_por_periodo||[]).forEach(function(x){ if(x.periodo && x.periodo.split('-')[0]===anio) s[x.periodo]=true; });
+  return s;
+}
+function _conSetVentana(per){
+  _conVentanaActual = (typeof HDR_MODO!=='undefined' && HDR_MODO==='anual') ? _conPeriodosAnio(per.split('-')[0]) : null;
+}
+function _conMatch(p, per){
+  return _conVentanaActual ? !!_conVentanaActual[p] : (p===per);
+}
+/** Etiqueta legible del período activo — el mes tal cual en modo mensual, o "AÑO (ene-sep)" en modo anual (solo los meses con datos, nunca proyectado a 12). */
+function _conVentanaLabel(per){
+  if(!_conVentanaActual) return per;
+  var arr=Object.keys(_conVentanaActual).sort();
+  if(!arr.length) return per.split('-')[0];
+  var mIni=parseInt(arr[0].split('-')[1],10), mFin=parseInt(arr[arr.length-1].split('-')[1],10);
+  var nIni=(_MESNOM[mIni]||'').slice(0,3).toLowerCase(), nFin=(_MESNOM[mFin]||'').slice(0,3).toLowerCase();
+  return arr[0].split('-')[0]+' ('+nIni+'-'+nFin+', '+arr.length+' meses)';
+}
 function _conPoblarSelectores(){
   var selM=document.getElementById('conMes');
   if(!selM) return;
@@ -2726,6 +2764,11 @@ function _conPoblarSelectores(){
     selM.value=conSelMes;
   }
   conSelMes=selM.value;
+  // El mes deja de aplicar en modo anual (se usa el año completo, ver
+  // _conSetVentana) — mismo tratamiento visual que el selector del header.
+  var esAnual = (typeof HDR_MODO!=='undefined' && HDR_MODO==='anual');
+  selM.disabled = esAnual;
+  selM.style.opacity = esAnual ? '0.5' : '1';
 }
 
 /** Lideres distintos vistos en cualquier período de personas_por_periodo. */
@@ -2764,13 +2807,13 @@ function _conLiderToggle(nombre){
  */
 function _conResolverArea(per){
   if(conSelPersona){
-    var found=(DASH.personas_por_periodo||[]).filter(function(p){return p.p===per && p.persona===conSelPersona;})[0];
+    var found=(DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && p.persona===conSelPersona;})[0];
     if(found && found.area) return found.area;
   }
   if(conSelRol){
     var horasPorArea={};
     (DASH.personas_por_periodo||[]).forEach(function(p){
-      if(p.p===per && p.rol===conSelRol && (!conSelLider || p.lider===conSelLider) && p.area){
+      if(_conMatch(p.p,per) && p.rol===conSelRol && (!conSelLider || p.lider===conSelLider) && p.area){
         horasPorArea[p.area] = (horasPorArea[p.area]||0) + (p.hF||0) + (p.hNF||0);
       }
     });
@@ -2780,7 +2823,7 @@ function _conResolverArea(per){
   if(conSelLider){
     var horasPorAreaL={};
     (DASH.personas_por_periodo||[]).forEach(function(p){
-      if(p.p===per && p.lider===conSelLider && p.area){
+      if(_conMatch(p.p,per) && p.lider===conSelLider && p.area){
         horasPorAreaL[p.area] = (horasPorAreaL[p.area]||0) + (p.hF||0) + (p.hNF||0);
       }
     });
@@ -2807,7 +2850,7 @@ function _conResolverArea(per){
     if(topLiderTodos) return topLiderTodos;
   }
   var ha={};
-  (DASH.programas_detalle||[]).forEach(function(x){ if(x.p===per && x.area && x.area!=='SIN ÁREA') ha[x.area]=(ha[x.area]||0)+(x.horas||0); });
+  (DASH.programas_detalle||[]).forEach(function(x){ if(_conMatch(x.p,per) && x.area && x.area!=='SIN ÁREA') ha[x.area]=(ha[x.area]||0)+(x.horas||0); });
   return Object.keys(ha).sort(function(a,b){return ha[b]-ha[a];})[0] || '';
 }
 
@@ -2821,8 +2864,8 @@ function _conResolverArea(per){
 function _conPoblarFiltrosPersona(per){
   var selR=document.getElementById('conRol'), selP=document.getElementById('conPersonaSel');
   if(!selR||!selP) return;
-  var key = conSelLider+'|'+per;
-  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return p.p===per && (!conSelLider || p.lider===conSelLider);});
+  var key = conSelLider+'|'+per+'|'+(_conVentanaActual?'anual':'mensual');
+  var personasMes = (DASH.personas_por_periodo||[]).filter(function(p){return _conMatch(p.p,per) && (!conSelLider || p.lider===conSelLider);});
 
   if(key !== _conFiltrosKey){
     _conFiltrosKey = key;
@@ -2860,7 +2903,7 @@ function _conFiltroChange(){
 function _conPersonasPermitidas(area, per){
   var set={};
   (DASH.personas_por_periodo||[]).filter(function(p){
-    return p.area===area && p.p===per
+    return p.area===area && _conMatch(p.p,per)
       && (!conSelLider || p.lider===conSelLider)
       && (!conSelRol || p.rol===conSelRol)
       && (!conSelPersona || p.persona===conSelPersona);
@@ -2876,20 +2919,23 @@ function renderConsolidada(){
   _conPoblarFiltrosPersona(conSelMes);
 
   var per=conSelMes;
+  _conSetVentana(per);
   var area=_conResolverArea(per);
   if(!area) return;
   var filtroPersonaActivo = !!(conSelLider || conSelRol || conSelPersona);
   var personasPermitidas = filtroPersonaActivo ? _conPersonasPermitidas(area, per) : null;
   document.getElementById('conTitle').textContent = area;
-  document.getElementById('conSubtitle').textContent = 'Vista consolidada de ' + area + ' — ' + per;
+  document.getElementById('conSubtitle').textContent = 'Vista consolidada de ' + area + ' — ' + _conVentanaLabel(per);
   var esAsignadora = _conEsAsignadora(area);
   var elAju=document.getElementById('conAjuCard'), elAsig=document.getElementById('conAsigCard'), elAsigD=document.getElementById('conAsigDescCard');
   if(elAju) elAju.style.display = esAsignadora ? 'none' : '';
   if(elAsig) elAsig.style.display = esAsignadora ? '' : 'none';
   if(elAsigD) elAsigD.style.display = esAsignadora ? '' : 'none';
 
-  // Data del mes seleccionado del área
-  var rows=(DASH.programas_detalle||[]).filter(function(x){return x.area===area && x.p===per;});
+  // Data del período activo del área (un solo mes, o todo el año hasta la
+  // fecha en modo Consolidado — ver _conMatch). Horas/ajustes/programas se
+  // SUMAN naturalmente al ampliar la ventana, sin cambiar esta lógica.
+  var rows=(DASH.programas_detalle||[]).filter(function(x){return x.area===area && _conMatch(x.p,per);});
   var hF=0,hNF=0,hTot=0,hAju=0,ajustesSet={};
   var progsSet={};
   rows.forEach(function(x){
@@ -2910,20 +2956,33 @@ function renderConsolidada(){
   // área+mes (puede pasar) se cae a la base de usuarios activos de
   // Usuarios_Jira para esa área (usuarios_activos_por_area, ver .gs) — un
   // respaldo sin período (no un histórico), mejor que mostrar 0.
-  var tl = (function(){
-    var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===per;})[0];
-    return r ? (r.tiempo_laboral||0) : 0;
-  })();
-  var colabJira = {};
-  (DASH.personas_por_periodo||[]).forEach(function(p){ if(p.area===area && p.p===per && p.persona) colabJira[p.persona]=true; });
-  var colab = Object.keys(colabJira).length;
-  var capacidadFuente = 'jira';
-  if (!colab){
-    var actFallback=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0];
-    colab = actFallback ? (actFallback.activos||0) : 0;
-    capacidadFuente = 'activos';
-  }
-  var pres = colab * tl;
+  // v2.17 (ver D-024) — en modo Consolidado, Capacidad se calcula MES A MES
+  // dentro de la ventana del año (nunca uniendo personas de distintos meses
+  // en un solo conteo, que infla el headcount) y luego: personas = PROMEDIO
+  // mensual (confirmado con el usuario), horas laborables = SUMA de cada mes
+  // (colabMes × tlMes acumulado) — mismo criterio ya usado en buildVMAnual
+  // (D-011): horas se acumulan, headcount se promedia. En modo mensual,
+  // `periodosVentana` es un array de 1 elemento y el resultado es idéntico
+  // al cálculo anterior (cero cambio de comportamiento).
+  var periodosVentana = _conVentanaActual ? Object.keys(_conVentanaActual).sort() : [per];
+  var colabPorMes=[], tlPorMes=[], presSuma=0, huboFallback=false;
+  periodosVentana.forEach(function(p){
+    var tlM = (function(){ var r=(DASH.areas_mo_por_periodo||[]).filter(function(x){return x.periodo===p;})[0]; return r?(r.tiempo_laboral||0):0; })();
+    var setM = {};
+    (DASH.personas_por_periodo||[]).forEach(function(pp){ if(pp.area===area && pp.p===p && pp.persona) setM[pp.persona]=true; });
+    var colabM = Object.keys(setM).length;
+    if(!colabM){
+      var actM=(DASH.usuarios_activos_por_area||[]).filter(function(x){return x.area===area;})[0];
+      colabM = actM ? (actM.activos||0) : 0;
+      huboFallback = true;
+    }
+    colabPorMes.push(colabM); tlPorMes.push(tlM);
+    presSuma += colabM*tlM;
+  });
+  var colab = colabPorMes.length ? Math.round(colabPorMes.reduce(function(s,x){return s+x;},0)/colabPorMes.length) : 0;
+  var tl = tlPorMes.length ? Math.round(tlPorMes.reduce(function(s,x){return s+x;},0)/tlPorMes.length) : 0;
+  var pres = presSuma;
+  var capacidadFuente = huboFallback ? 'activos' : 'jira';
 
   // KPI de utilización (salud)
   var util = pres ? hTot/pres*100 : null;
@@ -2938,7 +2997,7 @@ function renderConsolidada(){
   // BLOQUE 🅐 — 6 KPIs
   function _s(id,v){var e=document.getElementById(id); if(e) e.textContent=v;}
   _s('conKCap', colab+' pers');
-  _s('conKCapSub', Math.round(pres).toLocaleString('es-CO')+'h · '+tl+'h/pers'+(capacidadFuente==='activos'?' · s/ registro en Jira, usa activos':''));
+  _s('conKCapSub', Math.round(pres).toLocaleString('es-CO')+'h · '+tl+'h/pers'+(_conVentanaActual?' prom · '+periodosVentana.length+' meses':'')+(capacidadFuente==='activos'?' · s/ registro en Jira, usa activos':''));
   _s('conKProy', Object.keys(progsSet).length);
   _s('conKProySub', 'programas con horas del area');
   _s('conKEjec', Math.round(hTot).toLocaleString('es-CO')+'h');
@@ -2971,7 +3030,7 @@ function renderConsolidada(){
   // Fuente preferida: personas_detalle (tiene persona+programa+componente).
   // Si el mes está fuera de la ventana del ETL (o no se ha corrido main() con
   // la versión que la genera), se cae a `rows` (programas_detalle) sin persona.
-  var rowsPD = (DASH.personas_detalle||[]).filter(function(x){return x.area===area && x.p===per;});
+  var rowsPD = (DASH.personas_detalle||[]).filter(function(x){return x.area===area && _conMatch(x.p,per);});
   // Filtro Rol/Lider/Persona: personas_detalle no trae esos campos propios,
   // así que se filtra por nombre usando el set resuelto desde personas_por_periodo.
   if(personasPermitidas) rowsPD = rowsPD.filter(function(x){return personasPermitidas[x.persona];});
@@ -2990,9 +3049,9 @@ function renderConsolidada(){
   // (también sin filtro de área) — mismo patrón de fallback que arriba.
   var rowsNFDet;
   if (esAsignadora){
-    var pdTodas=(DASH.personas_detalle||[]).filter(function(x){return x.p===per;});
+    var pdTodas=(DASH.personas_detalle||[]).filter(function(x){return _conMatch(x.p,per);});
     var conPersonaTodas = pdTodas.length>0;
-    var baseTodas = conPersonaTodas ? pdTodas : (DASH.programas_detalle||[]).filter(function(x){return x.p===per;});
+    var baseTodas = conPersonaTodas ? pdTodas : (DASH.programas_detalle||[]).filter(function(x){return _conMatch(x.p,per);});
     rowsNFDet = baseTodas.filter(function(x){return x.fact==='NF';});
     var hNFTodas = rowsNFDet.reduce(function(s,x){return s+(x.horas||0);},0);
     _conRenderNF(rowsNFDet, per, hNFTodas, conPersonaTodas);
@@ -3040,10 +3099,10 @@ function _conFiltroProgramasAsignadora(area, rows){
  * programa, ver arriba).
  */
 function _conRenderAsignadora(per, area){
-  var rowsTodas=(DASH.programas_detalle||[]).filter(function(x){return x.p===per;});
+  var rowsTodas=(DASH.programas_detalle||[]).filter(function(x){return _conMatch(x.p,per);});
   rowsTodas = _conFiltroProgramasAsignadora(area, rowsTodas);
   var tagEl=document.getElementById('conAsigTag');
-  if(tagEl) tagEl.textContent = per+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas';
+  if(tagEl) tagEl.textContent = _conVentanaLabel(per)+' — '+rowsTodas.length.toLocaleString('es-CO')+' filas';
   var _an=_conNorm(area);
   var _subTxt = _an==='ECOSISTEMAS'
     ? 'Facturable vs No Facturable por programa — solo SuperLikers, SuperMeseros y SuperVendedores (alcance actual de Ecosistemas)'
@@ -3109,7 +3168,7 @@ function _conRenderAsignadora(per, area){
   if(dTag) dTag.textContent = filas.length+' combinaciones programa+area';
   if(d){
     if(!filas.length){
-      d.innerHTML='<div style="padding:10px;color:var(--muted);font-size:11px">Sin datos para '+per+'.</div>';
+      d.innerHTML='<div style="padding:10px;color:var(--muted);font-size:11px">Sin datos para '+_conVentanaLabel(per)+'.</div>';
     } else {
       var maxH=filas[0].horas||1;
       var html='<table style="width:100%;border-collapse:collapse;font-size:11px">'
@@ -3156,7 +3215,7 @@ function _conRenderAjustes(rows, area, per, hAju, hTot){
 
   // Personas asociadas (aprox): personas_por_periodo con hAjustes>0 del area/mes
   var personas=(DASH.personas_por_periodo||[]).filter(function(p){
-    return p.area===area&&p.p===per&&(p.hAjustes||0)>0
+    return p.area===area&&_conMatch(p.p,per)&&(p.hAjustes||0)>0
       && (!conSelLider || p.lider===conSelLider)
       && (!conSelRol || p.rol===conSelRol)
       && (!conSelPersona || p.persona===conSelPersona);
@@ -3271,13 +3330,13 @@ function _conRenderCruce(blockId, rowsDetalle, ids, conPersona, sinPersonaMsg){
 }
 function _conRenderTiempo(rowsDetalle, per, conPersona){
   var tag=document.getElementById('conTiempoTag');
-  if(tag) tag.textContent = per+' — '+Math.round(rowsDetalle.reduce(function(s,x){return s+(x.horas||0);},0)).toLocaleString('es-CO')+'h';
+  if(tag) tag.textContent = _conVentanaLabel(per)+' — '+Math.round(rowsDetalle.reduce(function(s,x){return s+(x.horas||0);},0)).toLocaleString('es-CO')+'h';
   _conRenderCruce('conTiempo', rowsDetalle, {chip:'conTiempoChip', prog:'conTiempoProg', comp:'conTiempoComp', persona:'conTiempoPersona'}, conPersona,
-    'Detalle por persona no disponible para '+per+' (fuera de la ventana del ETL, o falta correr main() con la versión que genera personas_detalle).');
+    'Detalle por persona no disponible para '+_conVentanaLabel(per)+' (fuera de la ventana del ETL, o falta correr main() con la versión que genera personas_detalle).');
 }
 function _conRenderNF(rowsNF, per, hNFTot, conPersona){
   var tag=document.getElementById('conNFTag');
-  if(tag) tag.textContent = per+' — '+Math.round(hNFTot).toLocaleString('es-CO')+'h NF';
+  if(tag) tag.textContent = _conVentanaLabel(per)+' — '+Math.round(hNFTot).toLocaleString('es-CO')+'h NF';
   if(!rowsNF.length){
     ['conNFProg','conNFComp','conNFPersona'].forEach(function(id){
       var e=document.getElementById(id); if(e) e.innerHTML='<div style="padding:10px;background:#E7F5EE;border-radius:6px;font-size:11px;color:#1D6E52">Sin horas No Facturables este mes.</div>';
@@ -3286,7 +3345,7 @@ function _conRenderNF(rowsNF, per, hNFTot, conPersona){
     return;
   }
   _conRenderCruce('conNF', rowsNF, {chip:'conNFChip', prog:'conNFProg', comp:'conNFComp', persona:'conNFPersona'}, conPersona,
-    'Detalle por persona no disponible para '+per+' (fuera de la ventana del ETL, o falta correr main() con la versión que genera personas_detalle).');
+    'Detalle por persona no disponible para '+_conVentanaLabel(per)+' (fuera de la ventana del ETL, o falta correr main() con la versión que genera personas_detalle).');
 }
 
 function _conRenderCompromiso(area, per){
