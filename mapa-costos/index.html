@@ -3664,7 +3664,7 @@ function _conRenderAsignadora(per){
   var cnv=document.getElementById('cConAsigProg');
   if(_cConAsigProg){ try{ _cConAsigProg.destroy(); }catch(e){} _cConAsigProg=null; }
   if(cnv && window.Chart){
-    _cConAsigProg=new Chart(cnv,{data:{
+    _cConAsigProg=new Chart(cnv,{type:'bar',data:{
       labels:progsOrd.map(function(p){return p.k.length>22?p.k.slice(0,20)+'...':p.k;}),
       datasets:[
         {label:'Facturable',data:progsOrd.map(function(p){return Math.round(p.f);}),backgroundColor:'#1D9E75',borderRadius:4,stack:'h'},
