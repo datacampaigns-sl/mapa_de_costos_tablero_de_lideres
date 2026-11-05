@@ -237,6 +237,17 @@ function numEU(v){
   return isNaN(n) ? 0 : n;
 }
 
+/**
+ * Normaliza la columna AÑO: algunas filas la traen formateada en
+ * configuración regional española ("2.026" con punto de miles) en vez de
+ * texto plano ("2026"). Sin esta normalización, "2026" y "2.026" se tratan
+ * como períodos distintos y el segundo queda fuera de cualquier filtro por
+ * año, generando un hueco silencioso en los totales.
+ */
+function _normAnio(v){
+  return String(v == null ? '' : v).trim().replace(/\./g, '');
+}
+
 // ── Parser CSV robusto (comillas, comas internas, saltos escapados) ─────────
 /** Devuelve array de arrays. Maneja campos entre comillas con comas/comillas dobles. */
 function parseCSV(texto){
@@ -351,7 +362,7 @@ function procesarNomina(cfg, nominaCSV, maestro){
   var porPeriodo = {};
   for (var i = 0; i < filas.length; i++){
     var r = filas[i];
-    var anio = String(col(r,['AÑO','ANO','ANIO'])).trim();
+    var anio = _normAnio(col(r,['AÑO','ANO','ANIO']));
     var mes  = String(col(r,['MES'])).trim();
     if (!anio || !mes) continue;
     var periodo = anio + '-' + (mes.length < 2 ? '0'+mes : mes);
@@ -413,7 +424,7 @@ function procesarEgresos(cfg, bcosCSV){
   var porPeriodo = {};
   for (var i = 0; i < filas.length; i++){
     var r = filas[i];
-    var anio = String(col(r,['AÑO','ANO'])).trim();
+    var anio = _normAnio(col(r,['AÑO','ANO']));
     var mm   = String(col(r,['MM','MES'])).trim();
     if (!anio || !mm) continue;
     var periodo = anio + '-' + (mm.length < 2 ? '0'+mm : mm);
@@ -496,7 +507,7 @@ function procesarFacturacion(cfg, facturacionCSV){
   var porPeriodo = {};
   for (var i = 0; i < filas.length; i++){
     var r = filas[i];
-    var anio = String(col(r,['AÑO','ANO'])).trim();
+    var anio = _normAnio(col(r,['AÑO','ANO']));
     var mes  = String(col(r,['Mes','MES'])).trim();
     if (!anio || !mes) continue;
     if (!/^\d+$/.test(mes)) continue;            // "Mes" numérico
